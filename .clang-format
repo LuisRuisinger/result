@@ -1,8 +1,35 @@
+Language: Cpp
 BasedOnStyle: Google
+
 IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
 ColumnLimit: 100
+
+DerivePointerAlignment: false
 PointerAlignment: Right
+ReferenceAlignment: Pointer
+
 IndentPPDirectives: AfterHash
+
+IndentAccessModifiers: false
+AccessModifierOffset: -4
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterControlStatement: Never
+  BeforeElse: false
+  BeforeCatch: false
+  BeforeLambdaBody: false
+  SplitEmptyFunction: true
+
+AllowShortFunctionsOnASingleLine: None
+AllowShortEnumsOnASingleLine: false
 
 AlignConsecutiveMacros:
   Enabled: true
@@ -13,6 +40,9 @@ AlignConsecutiveDeclarations:
   Enabled: true
   AcrossEmptyLines: false
   AcrossComments: false
+  AlignFunctionDeclarations: false
+  AlignFunctionPointers: false
 
-AllowShortIfStatementsOnASingleLine: Never
 AlignArrayOfStructures: Left
+
+Standard: Latest

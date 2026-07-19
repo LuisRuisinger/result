@@ -20,13 +20,12 @@ target_include_directories(result
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_compile_features(result INTERFACE cxx_std_17)
+target_compile_features(result INTERFACE cxx_std_20)
 
 # ================================================================================================
 # Options
 # ================================================================================================
 
-option(RESULT_BUILD_TESTS "Build result tests" ${PROJECT_IS_TOP_LEVEL})
 option(RESULT_ENABLE_CLANG_TIDY "Enable clang-tidy" OFF)
 option(RESULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
@@ -34,18 +33,9 @@ option(RESULT_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSa
 # clang-tidy
 # ================================================================================================
 
-if(RESULT_ENABLE_CLANG_TIDY)
+if (RESULT_ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
-endif()
-
-# ================================================================================================
-# Tests
-# ================================================================================================
-
-if(RESULT_BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
+endif ()
 
 # ================================================================================================
 # Install / package config
