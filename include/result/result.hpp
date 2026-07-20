@@ -7,27 +7,25 @@
 #    error "Result requires GCC or Clang."
 #endif
 
+#include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <new>
 #include <type_traits>
 
-#if !defined(RESULT_FREESTANDING)
-#    include <bit>
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
 #    include <cassert>
 #    include <cstring>
-#    include <exception>
 #    include <functional>
 #    include <memory>
 #    include <optional>
 #    include <stdexcept>
-#    include <utility>
-#    include <variant>
 #endif
 
-#if !defined(RESULT_FREESTANDING) && \
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__ && \
     (defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND))
 #    define RESULT_HAS_HOSTED_EXCEPTIONS 1
 #else
@@ -48,8 +46,8 @@
 
 #define CPP_RESULT_VERSION_STRING "0.1.1"
 
-#define CPP_RESULT_VERSION_ENCODE(major, minor, patch) \
-    (((major) * 10000) + ((minor) * 100) + (patch))
+#define CPP_RESULT_VERSION_ENCODE(major__, minor__, patch__) \
+    (((major__) * 10000) + ((minor__) * 100) + (patch__))
 
 #define CPP_RESULT_VERSION                                                        \
     CPP_RESULT_VERSION_ENCODE(CPP_RESULT_VERSION_MAJOR, CPP_RESULT_VERSION_MINOR, \
@@ -57,7 +55,7 @@
 
 #ifndef RESULT_ERROR
 #    define RESULT_DETAIL_DEFINED_RESULT_ERROR 1
-#    if defined(RESULT_FREESTANDING)
+#    if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
 #        define RESULT_ERROR(_m)  \
             do {                  \
                 (void)sizeof(_m); \
@@ -74,7 +72,7 @@
 
 #ifndef RESULT_ASSERT
 #    define RESULT_DETAIL_DEFINED_RESULT_ASSERT 1
-#    if defined(RESULT_FREESTANDING)
+#    if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
 #        define RESULT_ASSERT(_condition)             \
             do {                                      \
                 if (!(_condition)) {                  \
@@ -95,8 +93,8 @@ class Result;
 
 namespace detail {
 
-#if defined(RESULT_FREESTANDING)
-template <class T>
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename T>
 [[nodiscard]] constexpr T *addressof(T &value) noexcept
 {
     return __builtin_addressof(value);
@@ -105,48 +103,48 @@ template <class T>
 using std::addressof;
 #endif
 
-#if defined(RESULT_FREESTANDING)
-template <class T>
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename T>
 struct remove_reference {
     using type = T;
 };
 
-template <class T>
+template <typename T>
 struct remove_reference<T &> {
     using type = T;
 };
 
-template <class T>
+template <typename T>
 struct remove_reference<T &&> {
     using type = T;
 };
 
-template <class T>
+template <typename T>
 using remove_reference_t = typename remove_reference<T>::type;
 
-template <class T>
+template <typename T>
 constexpr remove_reference_t<T> &&move(T &&value) noexcept
 {
     return static_cast<remove_reference_t<T> &&>(value);
 }
 
-template <class T>
+template <typename T>
 struct is_lvalue_reference {
     static constexpr bool value = false;
 };
 
-template <class T>
+template <typename T>
 struct is_lvalue_reference<T &> {
     static constexpr bool value = true;
 };
 
-template <class T>
+template <typename T>
 constexpr T &&forward(remove_reference_t<T> &value) noexcept
 {
     return static_cast<T &&>(value);
 }
 
-template <class T>
+template <typename T>
 constexpr T &&forward(remove_reference_t<T> &&value) noexcept
 {
     static_assert(!is_lvalue_reference<T>::value,
@@ -159,14 +157,14 @@ using std::forward;
 using std::move;
 #endif
 
-#if defined(RESULT_FREESTANDING)
-template <class T>
-T &&declval() noexcept;
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename T>
+std::add_rvalue_reference_t<T> declval() noexcept;
 #else
 using std::declval;
 #endif
 
-template <class T, std::size_t N>
+template <typename T, std::size_t N>
 struct fixed_array {
     T elements[N == 0U ? 1U : N]{};
 
@@ -198,7 +196,8 @@ struct fixed_array {
     [[nodiscard]] constexpr bool operator==(const fixed_array &other) const noexcept
     {
         for (std::size_t index = 0; index < N; ++index) {
-            if (!(elements[index] == other.elements[index])) return false;
+            if (!(elements[index] == other.elements[index]))
+                return false;
         }
 
         return true;
@@ -212,21 +211,21 @@ struct fixed_array {
 
 using byte = unsigned char;
 
-template <std::size_t Size>
-using byte_array = fixed_array<byte, Size>;
+template <std::size_t N>
+using byte_array = fixed_array<byte, N>;
 
-#if defined(RESULT_FREESTANDING)
-template <std::size_t... Indices>
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <std::size_t... Is>
 struct index_sequence {
     using type = index_sequence;
 };
 
-template <std::size_t N, std::size_t... Indices>
-struct make_index_sequence_impl : make_index_sequence_impl<N - 1U, N - 1U, Indices...> {};
+template <std::size_t N, std::size_t... Is>
+struct make_index_sequence_impl : make_index_sequence_impl<N - 1U, N - 1U, Is...> {};
 
-template <std::size_t... Indices>
-struct make_index_sequence_impl<0U, Indices...> {
-    using type = index_sequence<Indices...>;
+template <std::size_t... Is>
+struct make_index_sequence_impl<0U, Is...> {
+    using type = index_sequence<Is...>;
 };
 
 template <std::size_t N>
@@ -236,89 +235,77 @@ using std::index_sequence;
 using std::make_index_sequence;
 #endif
 
-#if defined(RESULT_FREESTANDING)
-template <class To, class From>
-[[nodiscard]] constexpr To bit_cast(const From &from) noexcept
-{
-    static_assert(sizeof(To) == sizeof(From));
-    static_assert(std::is_trivially_copyable_v<To>);
-    static_assert(std::is_trivially_copyable_v<From>);
-
-    return __builtin_bit_cast(To, from);
-}
-#else
-using std::bit_cast;
-#endif
-
-#if defined(RESULT_FREESTANDING)
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
 inline void *memcpy(void *destination, const void *source, std::size_t size) noexcept
 {
+#    if __has_builtin(__builtin_memcpy)
     return __builtin_memcpy(destination, source, size);
+#    else
+#        error "__builtin_memcpy not available!"
+#    endif
 }
 #else
 using std::memcpy;
 #endif
 
-#if defined(RESULT_FREESTANDING)
-template <class T, class... Args>
-constexpr T *construct_at(T *location, Args &&...args)
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename T, typename... Args>
+    requires std::constructible_from<T, Args...>
+constexpr T *construct_at(T *location,
+                          Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args...>)
 {
     return ::new (static_cast<void *>(location)) T(forward<Args>(args)...);
 }
+#else
+using std::construct_at;
+#endif
 
-template <class T>
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename T>
 constexpr void destroy_at(T *location) noexcept
 {
     location->~T();
 }
-
-template <class T>
-[[nodiscard]] constexpr T *launder(T *pointer) noexcept
-{
-    return __builtin_launder(pointer);
-}
 #else
-using std::construct_at;
 using std::destroy_at;
-using std::launder;
 #endif
 
-#if defined(RESULT_FREESTANDING)
-template <class>
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename>
 struct member_pointer_class;
 
-template <class Class, class Member>
+template <typename Class, typename Member>
 struct member_pointer_class<Member Class::*> {
     using type = Class;
 };
 
-template <class MemberPointer, class Object, class... Args>
-decltype(auto) invoke_member_function(MemberPointer pointer, Object &&object, Args &&...args)
+template <typename MemberPtr, typename Obj, typename... Args>
+decltype(auto) invoke_member_function(MemberPtr pointer, Obj &&object, Args &&...args)
 {
-    using class_type = typename member_pointer_class<MemberPointer>::type;
+    using class_type = typename member_pointer_class<MemberPtr>::type;
 
-    if constexpr (std::is_base_of_v<class_type, std::remove_reference_t<Object>>) {
-        return (forward<Object>(object).*pointer)(forward<Args>(args)...);
+    if constexpr (std::is_base_of_v<class_type, std::remove_reference_t<Obj>>) {
+        return (forward<Obj>(object).*pointer)(forward<Args>(args)...);
     } else {
-        return ((*forward<Object>(object)).*pointer)(forward<Args>(args)...);
+        return ((*forward<Obj>(object)).*pointer)(forward<Args>(args)...);
     }
 }
 
-template <class MemberPointer, class Object>
-decltype(auto) invoke_member_object(MemberPointer pointer, Object &&object)
+template <typename MemberPtr, typename Obj>
+decltype(auto) invoke_member_object(MemberPtr pointer, Obj &&object)
 {
-    using class_type = typename member_pointer_class<MemberPointer>::type;
+    using class_type = typename member_pointer_class<MemberPtr>::type;
 
-    if constexpr (std::is_base_of_v<class_type, std::remove_reference_t<Object>>) {
-        return forward<Object>(object).*pointer;
+    if constexpr (std::is_base_of_v<class_type, std::remove_reference_t<Obj>>) {
+        return forward<Obj>(object).*pointer;
     } else {
-        return (*forward<Object>(object)).*pointer;
+        return (*forward<Obj>(object)).*pointer;
     }
 }
 #endif
 
-#if defined(RESULT_FREESTANDING)
-template <class Fn, class... Args>
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename Fn, typename... Args>
 decltype(auto) invoke(Fn &&fn, Args &&...args)
 {
     using callable = std::remove_cvref_t<Fn>;
@@ -343,12 +330,16 @@ struct string_view {
 
     constexpr string_view() noexcept = default;
 
-    constexpr string_view(const char *text, std::size_t size) noexcept : m_data(text), m_size(size)
+    constexpr string_view(const char *text, std::size_t size) noexcept
+        : m_data(text),
+          m_size(size)
     {
     }
 
-    template <std::size_t Size>
-    constexpr string_view(const char (&text)[Size]) noexcept : m_data(text), m_size(Size - 1U)
+    template <std::size_t N>
+    constexpr string_view(const char (&text)[N]) noexcept
+        : m_data(text),
+          m_size(N - 1U)
     {
     }
 
@@ -380,7 +371,8 @@ struct string_view {
     [[nodiscard]] constexpr string_view substr(std::size_t position,
                                                std::size_t count = npos) const noexcept
     {
-        if (position > m_size) return {};
+        if (position > m_size)
+            return {};
 
         const std::size_t available = m_size - position;
         const std::size_t length = count < available ? count : available;
@@ -390,7 +382,8 @@ struct string_view {
     [[nodiscard]] constexpr std::size_t find(char needle, std::size_t position = 0U) const noexcept
     {
         for (std::size_t index = position; index < m_size; ++index) {
-            if (m_data[index] == needle) return index;
+            if (m_data[index] == needle)
+                return index;
         }
 
         return npos;
@@ -399,9 +392,11 @@ struct string_view {
     [[nodiscard]] constexpr std::size_t find(string_view needle,
                                              std::size_t position = 0U) const noexcept
     {
-        if (needle.m_size == 0U) return position <= m_size ? position : npos;
+        if (needle.m_size == 0U)
+            return position <= m_size ? position : npos;
 
-        if (needle.m_size > m_size || position > m_size - needle.m_size) return npos;
+        if (needle.m_size > m_size || position > m_size - needle.m_size)
+            return npos;
 
         for (std::size_t index = position; index <= m_size - needle.m_size; ++index) {
             bool match = true;
@@ -412,7 +407,8 @@ struct string_view {
                 }
             }
 
-            if (match) return index;
+            if (match)
+                return index;
         }
 
         return npos;
@@ -421,7 +417,8 @@ struct string_view {
     [[nodiscard]] constexpr std::size_t rfind(char needle) const noexcept
     {
         for (std::size_t index = m_size; index > 0U; --index) {
-            if (m_data[index - 1U] == needle) return index - 1U;
+            if (m_data[index - 1U] == needle)
+                return index - 1U;
         }
 
         return npos;
@@ -429,9 +426,11 @@ struct string_view {
 
     [[nodiscard]] constexpr std::size_t rfind(string_view needle) const noexcept
     {
-        if (needle.m_size == 0U) return m_size;
+        if (needle.m_size == 0U)
+            return m_size;
 
-        if (needle.m_size > m_size) return npos;
+        if (needle.m_size > m_size)
+            return npos;
 
         for (std::size_t index = m_size - needle.m_size + 1U; index > 0U; --index) {
             const std::size_t start = index - 1U;
@@ -443,14 +442,15 @@ struct string_view {
                 }
             }
 
-            if (match) return start;
+            if (match)
+                return start;
         }
 
         return npos;
     }
 };
 
-#if defined(RESULT_FREESTANDING)
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
 struct nullopt_t {
     explicit constexpr nullopt_t(int) noexcept
     {
@@ -465,21 +465,6 @@ struct in_place_t {
 
 inline constexpr in_place_t in_place{};
 
-template <std::size_t Index>
-struct in_place_index_t {
-    explicit constexpr in_place_index_t() noexcept = default;
-};
-
-template <std::size_t Index>
-inline constexpr in_place_index_t<Index> in_place_index{};
-
-template <class T>
-struct in_place_type_t {
-    explicit constexpr in_place_type_t() noexcept = default;
-};
-
-template <class T>
-inline constexpr in_place_type_t<T> in_place_type{};
 #else
 using std::nullopt_t;
 inline constexpr auto nullopt = std::nullopt;
@@ -487,37 +472,6 @@ inline constexpr auto nullopt = std::nullopt;
 using std::in_place_t;
 inline constexpr auto in_place = std::in_place;
 
-template <std::size_t Index>
-using in_place_index_t = std::in_place_index_t<Index>;
-
-template <std::size_t Index>
-inline constexpr auto in_place_index = std::in_place_index<Index>;
-
-template <class T>
-using in_place_type_t = std::in_place_type_t<T>;
-
-template <class T>
-inline constexpr auto in_place_type = std::in_place_type<T>;
-#endif
-
-template <std::size_t Index, class... Ts>
-struct nth_type;
-
-template <class First, class... Rest>
-struct nth_type<0U, First, Rest...> {
-    using type = First;
-};
-
-template <std::size_t Index, class First, class... Rest>
-struct nth_type<Index, First, Rest...> : nth_type<Index - 1U, Rest...> {};
-
-template <std::size_t Index, class... Ts>
-using nth_type_t = typename nth_type<Index, Ts...>::type;
-
-#if defined(RESULT_FREESTANDING)
-inline constexpr std::size_t variant_npos = static_cast<std::size_t>(-1);
-#else
-inline constexpr auto variant_npos = std::variant_npos;
 #endif
 
 [[noreturn]] inline void optional_empty_access()
@@ -526,15 +480,6 @@ inline constexpr auto variant_npos = std::variant_npos;
     throw std::logic_error("optional has no value");
 #else
     RESULT_ERROR("optional has no value");
-#endif
-}
-
-[[noreturn]] inline void bad_variant_access()
-{
-#if RESULT_HAS_HOSTED_EXCEPTIONS
-    throw std::bad_variant_access{};
-#else
-    RESULT_ERROR("bad variant access");
 #endif
 }
 
@@ -559,11 +504,13 @@ template <typename T>
 struct Ok {
     using value_type = T;
 
-    explicit Ok(const T &value) : value(value)
+    explicit Ok(const T &value)
+        : value(value)
     {
     }
 
-    explicit Ok(T &&value) : value(detail::move(value))
+    explicit Ok(T &&value)
+        : value(detail::move(value))
     {
     }
 
@@ -574,7 +521,8 @@ template <typename T>
 struct Ok<T &> {
     using value_type = T &;
 
-    explicit Ok(T &value) noexcept : value(detail::addressof(value))
+    explicit Ok(T &value) noexcept
+        : value(detail::addressof(value))
     {
     }
 
@@ -590,11 +538,13 @@ template <typename E>
 struct Err {
     using value_type = E;
 
-    explicit Err(const E &value) : value(value)
+    explicit Err(const E &value)
+        : value(value)
     {
     }
 
-    explicit Err(E &&value) : value(detail::move(value))
+    explicit Err(E &&value)
+        : value(detail::move(value))
     {
     }
 
@@ -605,7 +555,8 @@ template <typename E>
 struct Err<E &> {
     using value_type = E &;
 
-    explicit Err(E &value) noexcept : value(detail::addressof(value))
+    explicit Err(E &value) noexcept
+        : value(detail::addressof(value))
     {
     }
 
@@ -1066,32 +1017,32 @@ public:
 
 namespace storage {
 
-template <class...>
+template <typename...>
 inline constexpr bool always_false_v = false;
 
 namespace detail {
 
-template <class T>
+template <typename T>
 using unqualified_t = std::remove_cv_t<T>;
 
-#if defined(RESULT_FREESTANDING)
-template <class T>
-constexpr void swap(T &left, T &right) noexcept(std::is_nothrow_move_constructible_v<T> &&
-                                                std::is_nothrow_move_assignable_v<T>)
+#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
+template <typename T>
+constexpr void swap(T &lhs, T &rhs) noexcept(std::is_nothrow_move_constructible_v<T> &&
+                                             std::is_nothrow_move_assignable_v<T>)
 {
-    T temporary(move(left));
-    left = move(right);
-    right = move(temporary);
+    T temporary(move(lhs));
+    lhs = move(rhs);
+    rhs = move(temporary);
 }
 #else
 using std::swap;
 #endif
 
-template <class Representation>
+template <typename Representation>
 constexpr auto representation_bytes(Representation representation) noexcept
 {
     static_assert(std::is_trivially_copyable_v<Representation>);
-    return bit_cast<fixed_array<byte, sizeof(Representation)>>(representation);
+    return std::bit_cast<fixed_array<byte, sizeof(Representation)>>(representation);
 }
 
 constexpr bool contains(string_view text, string_view token) noexcept
@@ -1104,7 +1055,8 @@ constexpr string_view enum_argument_fragment(string_view signature) noexcept
     constexpr string_view marker = "Value = ";
     const std::size_t     marker_position = signature.find(marker);
 
-    if (marker_position == string_view::npos) return {};
+    if (marker_position == string_view::npos)
+        return {};
 
     const std::size_t begin = marker_position + marker.size();
     std::size_t       end = signature.size();
@@ -1112,26 +1064,28 @@ constexpr string_view enum_argument_fragment(string_view signature) noexcept
     constexpr char delimiters[] = {';', ',', ']'};
     for (auto del : delimiters) {
         const std::size_t position = signature.find(del, begin);
-        if (position != string_view::npos && position < end) end = position;
+        if (position != string_view::npos && position < end)
+            end = position;
     }
 
     return signature.substr(begin, end - begin);
 }
 
-template <class E, E Value>
+template <typename E, E Value>
 constexpr string_view enum_value_signature()
 {
     return __PRETTY_FUNCTION__;
 }
 
-template <class E, E Value>
+template <typename E, E Value>
 constexpr bool is_named_enum_value()
 {
     static_assert(std::is_enum_v<E>);
 
     constexpr string_view fragment = enum_argument_fragment(enum_value_signature<E, Value>());
 
-    if (fragment.empty()) return false;
+    if (fragment.empty())
+        return false;
 
     const std::size_t last_scope = fragment.rfind("::");
     const std::size_t last_close_paren = fragment.rfind(')');
@@ -1141,7 +1095,7 @@ constexpr bool is_named_enum_value()
            !contains(fragment, "{") && !contains(fragment, "static_cast");
 }
 
-template <class T>
+template <typename T>
 constexpr string_view type_signature()
 {
     return __PRETTY_FUNCTION__;
@@ -1188,7 +1142,8 @@ constexpr std::underlying_type_t<T> find_hashed_enum_sentinel(index_sequence<Is.
         is_named_enum_value<T, static_cast<T>(hashed_enum_candidate<T, Is>)>()...};
 
     for (std::size_t index = 0; index < candidates.size(); ++index) {
-        if (!named[index]) return candidates[index];
+        if (!named[index])
+            return candidates[index];
     }
 
     return candidates[0];
@@ -1210,13 +1165,14 @@ constexpr std::underlying_type_t<T> find_small_enum_sentinel(index_sequence<Is..
         T, static_cast<T>(static_cast<underlying_type>(first + static_cast<int>(Is)))>()...};
 
     for (std::size_t index = 0; index < candidates.size(); ++index) {
-        if (!named[index]) return candidates[index];
+        if (!named[index])
+            return candidates[index];
     }
 
     return candidates[0];
 }
 
-template <class E>
+template <typename E>
 constexpr std::underlying_type_t<E> find_automatic_enum_sentinel()
 {
     static_assert(std::is_enum_v<E>);
@@ -1242,7 +1198,7 @@ struct sentinel_bits {
 /* Selects ordinary flag-backed storage. */
 struct separate_flag_policy {};
 
-template <class T, class Enable = void>
+template <typename T, typename Enable = void>
 struct automatic_sentinel;
 
 template <>
@@ -1258,7 +1214,7 @@ struct automatic_sentinel<double> : sentinel_bits<std::uint64_t{0x7ff8'fedc'ba98
     static_assert(std::numeric_limits<double>::is_iec559);
 };
 
-template <class T>
+template <typename T>
 struct automatic_sentinel<T, std::enable_if_t<std::is_pointer_v<T>>> {
     using representation_type = std::uintptr_t;
 
@@ -1282,7 +1238,7 @@ struct automatic_sentinel<T, std::enable_if_t<std::is_pointer_v<T>>> {
     static_assert(sizeof(representation_type) == sizeof(T));
 };
 
-template <class E>
+template <typename E>
 struct automatic_sentinel<E, std::enable_if_t<std::is_enum_v<E>>> {
     using representation_type = std::underlying_type_t<E>;
     static constexpr representation_type value = detail::find_automatic_enum_sentinel<E>();
@@ -1290,43 +1246,43 @@ struct automatic_sentinel<E, std::enable_if_t<std::is_enum_v<E>>> {
     static_assert(!detail::is_named_enum_value<E, static_cast<E>(value)>());
 };
 
-template <class T>
+template <typename T>
 concept has_automatic_sentinel = requires {
     typename automatic_sentinel<detail::unqualified_t<T>>::representation_type;
     automatic_sentinel<detail::unqualified_t<T>>::value;
 };
 
-template <class Policy>
+template <typename Policy>
 concept sentinel_policy = requires {
     typename Policy::representation_type;
     Policy::value;
 };
 
-template <class T, bool = has_automatic_sentinel<T>>
+template <typename T, bool = has_automatic_sentinel<T>>
 struct default_policy_selector {
     using type = separate_flag_policy;
 };
 
-template <class T>
+template <typename T>
 struct default_policy_selector<T, true> {
     using type = automatic_sentinel<detail::unqualified_t<T>>;
 };
 
-template <class T>
+template <typename T>
 using default_policy_t = typename default_policy_selector<T>::type;
 
 namespace detail {
 
-template <class Policy, bool = sentinel_policy<Policy>>
+template <typename Policy, bool = sentinel_policy<Policy>>
 struct sentinel_metadata {};
 
-template <class Policy>
+template <typename Policy>
 struct sentinel_metadata<Policy, true> {
     using sentinel_representation_type = typename Policy::representation_type;
     inline static constexpr sentinel_representation_type sentinel_representation = Policy::value;
 };
 
-template <class T, class Policy>
+template <typename T, typename Policy>
 class compressed_storage {
 private:
     using representation_type = typename Policy::representation_type;
@@ -1356,12 +1312,12 @@ private:
 
     [[nodiscard]] T *ptr() noexcept
     {
-        return launder(raw_ptr());
+        return std::launder(raw_ptr());
     }
 
     [[nodiscard]] const T *ptr() const noexcept
     {
-        return launder(raw_ptr());
+        return std::launder(raw_ptr());
     }
 
     constexpr void write_empty() noexcept
@@ -1390,39 +1346,48 @@ public:
         write_empty();
     }
 
-    constexpr compressed_storage(nullopt_t) noexcept : compressed_storage()
+    constexpr compressed_storage(nullopt_t) noexcept
+        : compressed_storage()
     {
     }
 
-    compressed_storage(const T &value) : compressed_storage()
+    compressed_storage(const T &value)
+        : compressed_storage()
     {
         emplace(value);
     }
 
-    compressed_storage(T &&value) : compressed_storage()
+    compressed_storage(T &&value)
+        : compressed_storage()
     {
         emplace(move(value));
     }
 
-    template <class... Args>
-    explicit compressed_storage(in_place_t, Args &&...args) : compressed_storage()
+    template <typename... Args>
+    explicit compressed_storage(in_place_t, Args &&...args)
+        : compressed_storage()
     {
         emplace(forward<Args>(args)...);
     }
 
-    compressed_storage(const compressed_storage &other) : compressed_storage()
+    compressed_storage(const compressed_storage &other)
+        : compressed_storage()
     {
-        if (other.has_value()) start_lifetime_from(*other);
+        if (other.has_value())
+            start_lifetime_from(*other);
     }
 
-    compressed_storage(compressed_storage &&other) noexcept : compressed_storage()
+    compressed_storage(compressed_storage &&other) noexcept
+        : compressed_storage()
     {
-        if (other.has_value()) start_lifetime_from(*other);
+        if (other.has_value())
+            start_lifetime_from(*other);
     }
 
     ~compressed_storage()
     {
-        if (has_value()) destroy_at(ptr());
+        if (has_value())
+            destroy_at(ptr());
     }
 
     compressed_storage &operator=(const compressed_storage &other)
@@ -1517,50 +1482,55 @@ public:
 
     [[nodiscard]] T &value() &
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return *ptr();
     }
 
     [[nodiscard]] const T &value() const &
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return *ptr();
     }
 
     [[nodiscard]] T &&value() &&
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return move(*ptr());
     }
 
     [[nodiscard]] const T &&value() const &&
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return move(*ptr());
     }
 
-    template <class U>
+    template <typename U>
     [[nodiscard]] T value_or(U &&default_value) const &
     {
         return has_value() ? **this : static_cast<T>(forward<U>(default_value));
     }
 
-    template <class U>
+    template <typename U>
     [[nodiscard]] T value_or(U &&default_value) &&
     {
         return has_value() ? move(**this) : static_cast<T>(forward<U>(default_value));
     }
 
-    template <class... Args>
+    template <typename... Args>
     T &emplace(Args &&...args)
     {
         T candidate(forward<Args>(args)...);
 
-        if (has_reserved_representation(candidate)) bad_sentinel_value_access();
+        if (has_reserved_representation(candidate))
+            bad_sentinel_value_access();
 
         reset();
         start_lifetime_from(candidate);
@@ -1570,7 +1540,8 @@ public:
 
     constexpr void reset() noexcept
     {
-        if (has_value()) destroy_at(ptr());
+        if (has_value())
+            destroy_at(ptr());
 
         write_empty();
     }
@@ -1590,14 +1561,18 @@ public:
     }
 };
 
-template <class T>
+template <typename T>
 class separate_storage {
-private:
     union storage_union {
         char inactive;
         T    value;
 
-        constexpr storage_union() noexcept : inactive{}
+        constexpr storage_union() noexcept
+            : inactive{}
+        {
+        }
+
+        ~storage_union()
         {
         }
     } m_storage;
@@ -1606,23 +1581,24 @@ private:
 
     [[nodiscard]] constexpr T *ptr() noexcept
     {
-        return launder(addressof(m_storage.value));
+        return std::launder(addressof(m_storage.value));
     }
 
     [[nodiscard]] constexpr const T *ptr() const noexcept
     {
-        return launder(addressof(m_storage.value));
+        return std::launder(addressof(m_storage.value));
     }
 
 public:
     inline static constexpr bool is_compressed = false;
 
     constexpr separate_storage() noexcept = default;
-    constexpr separate_storage(nullopt_t) noexcept : separate_storage()
+    constexpr separate_storage(nullopt_t) noexcept
+        : separate_storage()
     {
     }
 
-    template <class U = T>
+    template <typename U = T>
         requires std::constructible_from<T, U &&>
     explicit(!std::convertible_to<U &&, T>) constexpr separate_storage(U &&value)
         : separate_storage()
@@ -1630,9 +1606,10 @@ public:
         emplace(forward<U>(value));
     }
 
-    template <class... Args>
+    template <typename... Args>
         requires std::constructible_from<T, Args...>
-    explicit constexpr separate_storage(in_place_t, Args &&...args) : separate_storage()
+    explicit constexpr separate_storage(in_place_t, Args &&...args)
+        : separate_storage()
     {
         emplace(forward<Args>(args)...);
     }
@@ -1641,14 +1618,16 @@ public:
         requires std::copy_constructible<T>
         : separate_storage()
     {
-        if (other.has_value()) emplace(*other);
+        if (other.has_value())
+            emplace(*other);
     }
 
     separate_storage(separate_storage &&other) noexcept(std::is_nothrow_move_constructible_v<T>)
         requires std::move_constructible<T>
         : separate_storage()
     {
-        if (other.has_value()) emplace(move(*other));
+        if (other.has_value())
+            emplace(move(*other));
     }
 
     ~separate_storage()
@@ -1691,7 +1670,7 @@ public:
         return *this;
     }
 
-    template <class U = T>
+    template <typename U = T>
         requires std::constructible_from<T, U &&>
     constexpr separate_storage &operator=(U &&value)
     {
@@ -1747,45 +1726,49 @@ public:
 
     [[nodiscard]] constexpr T &value() &
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return *ptr();
     }
 
     [[nodiscard]] constexpr const T &value() const &
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return *ptr();
     }
 
     [[nodiscard]] constexpr T &&value() &&
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return move(*ptr());
     }
 
     [[nodiscard]] constexpr const T &&value() const &&
     {
-        if (!has_value()) optional_empty_access();
+        if (!has_value())
+            optional_empty_access();
 
         return move(*ptr());
     }
 
-    template <class U>
+    template <typename U>
     [[nodiscard]] constexpr T value_or(U &&default_value) const &
     {
         return has_value() ? **this : static_cast<T>(forward<U>(default_value));
     }
 
-    template <class U>
+    template <typename U>
     [[nodiscard]] constexpr T value_or(U &&default_value) &&
     {
         return has_value() ? move(**this) : static_cast<T>(forward<U>(default_value));
     }
 
-    template <class... Args>
+    template <typename... Args>
         requires std::constructible_from<T, Args...>
     constexpr T &emplace(Args &&...args)
     {
@@ -1820,15 +1803,15 @@ public:
     }
 };
 
-template <class T, class Policy, bool = sentinel_policy<Policy>>
+template <typename T, typename Policy, bool = sentinel_policy<Policy>>
 struct storage_selector;
 
-template <class T, class Policy>
+template <typename T, typename Policy>
 struct storage_selector<T, Policy, true> {
     using type = compressed_storage<T, Policy>;
 };
 
-template <class T, class Policy>
+template <typename T, typename Policy>
 struct storage_selector<T, Policy, false> {
     static_assert(std::is_same_v<Policy, separate_flag_policy>,
                   "Policy must be a sentinel policy or tiny::separate_flag_policy");
@@ -1837,7 +1820,7 @@ struct storage_selector<T, Policy, false> {
 
 }  // namespace detail
 
-template <class T, class Policy = default_policy_t<T>>
+template <typename T, typename Policy = default_policy_t<T>>
 class optional : public detail::sentinel_metadata<Policy> {
 private:
     static_assert(!std::is_const_v<T> && !std::is_volatile_v<T>,
@@ -1857,11 +1840,12 @@ public:
 
     constexpr optional() noexcept(std::is_nothrow_default_constructible_v<storage_type>) = default;
 
-    constexpr optional(nullopt_t) noexcept : m_storage(nullopt)
+    constexpr optional(nullopt_t) noexcept
+        : m_storage(nullopt)
     {
     }
 
-    template <class U = T>
+    template <typename U = T>
         requires std::constructible_from<storage_type, U &&> &&
                  (!std::same_as<std::remove_cvref_t<U>, optional>) &&
                  (!std::same_as<std::remove_cvref_t<U>, in_place_t>) &&
@@ -1871,7 +1855,7 @@ public:
     {
     }
 
-    template <class... Args>
+    template <typename... Args>
         requires std::constructible_from<storage_type, in_place_t, Args...>
     explicit constexpr optional(in_place_t, Args &&...args)
         : m_storage(in_place, forward<Args>(args)...)
@@ -1892,7 +1876,7 @@ public:
         return *this;
     }
 
-    template <class U = T>
+    template <typename U = T>
         requires requires(storage_type &storage, U &&value) { storage = forward<U>(value); } &&
                  (!std::same_as<std::remove_cvref_t<U>, optional>)
     constexpr optional &operator=(U &&value)
@@ -1961,19 +1945,19 @@ public:
         return move(m_storage).value();
     }
 
-    template <class U>
+    template <typename U>
     [[nodiscard]] constexpr T value_or(U &&default_value) const &
     {
         return m_storage.value_or(forward<U>(default_value));
     }
 
-    template <class U>
+    template <typename U>
     [[nodiscard]] constexpr T value_or(U &&default_value) &&
     {
         return move(m_storage).value_or(forward<U>(default_value));
     }
 
-    template <class... Args>
+    template <typename... Args>
         requires requires(storage_type &storage, Args &&...args) {
             storage.emplace(forward<Args>(args)...);
         }
@@ -1993,903 +1977,45 @@ public:
     }
 };
 
-template <class T, class LeftPolicy, class RightPolicy>
-[[nodiscard]] constexpr bool operator==(const optional<T, LeftPolicy>  &left,
-                                        const optional<T, RightPolicy> &right)
+template <typename T, typename LeftPolicy, typename RightPolicy>
+[[nodiscard]] constexpr bool operator==(const optional<T, LeftPolicy>  &lhs,
+                                        const optional<T, RightPolicy> &rhs)
 {
-    if (left.has_value() != right.has_value()) return false;
+    if (lhs.has_value() != rhs.has_value())
+        return false;
 
-    return !left.has_value() || *left == *right;
+    return !lhs.has_value() || *lhs == *rhs;
 }
 
-template <class T, class Policy>
+template <typename T, typename Policy>
 [[nodiscard]] constexpr bool operator==(const optional<T, Policy> &value, nullopt_t) noexcept
 {
     return !value.has_value();
 }
 
-template <class T, class Policy>
+template <typename T, typename Policy>
 [[nodiscard]] constexpr bool operator==(nullopt_t, const optional<T, Policy> &value) noexcept
 {
     return !value.has_value();
 }
 
-template <class T, class Policy>
-[[nodiscard]] constexpr bool operator==(const optional<T, Policy> &left, const T &right)
+template <typename T, typename Policy>
+[[nodiscard]] constexpr bool operator==(const optional<T, Policy> &lhs, const T &rhs)
 {
-    return left.has_value() && *left == right;
+    return lhs.has_value() && *lhs == rhs;
 }
 
-template <class T, class Policy>
-[[nodiscard]] constexpr bool operator==(const T &left, const optional<T, Policy> &right)
+template <typename T, typename Policy>
+[[nodiscard]] constexpr bool operator==(const T &lhs, const optional<T, Policy> &rhs)
 {
-    return right == left;
+    return rhs == lhs;
 }
 
-template <class T, class Policy>
-constexpr void swap(optional<T, Policy> &left,
-                    optional<T, Policy> &right) noexcept(noexcept(left.swap(right)))
+template <typename T, typename Policy>
+constexpr void swap(optional<T, Policy> &lhs,
+                    optional<T, Policy> &rhs) noexcept(noexcept(lhs.swap(rhs)))
 {
-    left.swap(right);
-}
-
-namespace detail {
-
-template <std::size_t N>
-struct unsigned_word_for_size {
-    using type = std::uint64_t;
-    inline static constexpr bool supported = false;
-};
-
-template <>
-struct unsigned_word_for_size<1> {
-    using type = std::uint8_t;
-    inline static constexpr bool supported = true;
-};
-
-template <>
-struct unsigned_word_for_size<2> {
-    using type = std::uint16_t;
-    inline static constexpr bool supported = true;
-};
-
-template <>
-struct unsigned_word_for_size<4> {
-    using type = std::uint32_t;
-    inline static constexpr bool supported = true;
-};
-
-template <>
-struct unsigned_word_for_size<8> {
-    using type = std::uint64_t;
-    inline static constexpr bool supported = true;
-};
-
-template <std::size_t N>
-using unsigned_word_for_size_t = typename unsigned_word_for_size<N>::type;
-
-template <class T, class Enable = void>
-struct niche_domain {
-    inline static constexpr bool available = false;
-};
-
-template <>
-struct niche_domain<bool> {
-    inline static constexpr bool available = true;
-    using word_type = std::uint8_t;
-
-    template <auto Candidate>
-    static constexpr bool accepts()
-    {
-        constexpr word_type value = static_cast<word_type>(Candidate);
-        return value != 0U && value != 1U;
-    }
-
-    template <std::size_t Index>
-    static constexpr word_type candidate()
-    {
-        return static_cast<word_type>(Index);
-    }
-};
-
-template <>
-struct niche_domain<float> {
-    inline static constexpr bool available = std::numeric_limits<float>::is_iec559;
-    using word_type = std::uint32_t;
-
-    template <auto Candidate>
-    static constexpr bool accepts()
-    {
-        constexpr word_type value = static_cast<word_type>(Candidate);
-        constexpr word_type exponent_mask = 0x7f80'0000U;
-        constexpr word_type fraction_mask = 0x007f'ffffU;
-
-        return (value & exponent_mask) == exponent_mask && (value & fraction_mask) != 0U;
-    }
-
-    template <std::size_t Index>
-    static constexpr word_type candidate()
-    {
-        if constexpr (Index == 0U) {
-            return automatic_sentinel<float>::value;
-        } else {
-            return 0x7fc0'0000U | static_cast<word_type>(splitmix64(Index) & 0x003f'ffffULL);
-        }
-    }
-};
-
-template <>
-struct niche_domain<double> {
-    inline static constexpr bool available = std::numeric_limits<double>::is_iec559;
-    using word_type = std::uint64_t;
-
-    template <auto Candidate>
-    static constexpr bool accepts()
-    {
-        constexpr word_type value = static_cast<word_type>(Candidate);
-        constexpr word_type exponent_mask = 0x7ff0'0000'0000'0000ULL;
-        constexpr word_type fraction_mask = 0x000f'ffff'ffff'ffffULL;
-
-        return (value & exponent_mask) == exponent_mask && (value & fraction_mask) != 0ULL;
-    }
-
-    template <std::size_t I>
-    static constexpr word_type candidate()
-    {
-        if constexpr (I == 0U) {
-            return automatic_sentinel<double>::value;
-        } else {
-            constexpr word_type upper_payload = splitmix64(I) & 0x0007'ffff'0000'0000ULL;
-            constexpr word_type float_nan =
-                static_cast<word_type>(niche_domain<float>::template candidate<I>());
-
-            return 0x7ff8'0000'0000'0000ULL | upper_payload | float_nan;
-        }
-    }
-};
-
-template <class T>
-struct niche_domain<T, std::enable_if_t<std::is_pointer_v<T>>> {
-    inline static constexpr bool available = has_automatic_sentinel<T>;
-    using word_type = std::uintptr_t;
-
-    template <auto Candidate>
-    static constexpr bool accepts()
-    {
-        constexpr word_type value = static_cast<word_type>(Candidate);
-
-#if defined(__x86_64__) || defined(_M_X64)
-        constexpr bool      sign = ((value >> 56U) & word_type{1}) != 0;
-        constexpr word_type high = value >> 57U;
-        constexpr word_type expected = sign ? word_type{0x7f} : word_type{0};
-
-        return high != expected;
-#else
-        return value == automatic_sentinel<T>::value;
-#endif
-    }
-
-    template <std::size_t Index>
-    static constexpr word_type candidate()
-    {
-        if constexpr (Index == 0U) {
-            return automatic_sentinel<T>::value;
-        }
-#if defined(__x86_64__) || defined(_M_X64)
-        else {
-            constexpr word_type low_mask = (word_type{1} << 56U) - 1U;
-            constexpr word_type random_low = static_cast<word_type>(splitmix64(Index)) & low_mask;
-            constexpr word_type float_nan =
-                static_cast<word_type>(niche_domain<float>::template candidate<Index>());
-            constexpr word_type low = (random_low & ~word_type{0xffff'ffffULL}) | float_nan;
-
-            return (word_type{0x7e} << 57U) | low;
-        }
-#else
-        else {
-            return automatic_sentinel<T>::value;
-        }
-#endif
-    }
-};
-
-template <class E>
-struct niche_domain<E, std::enable_if_t<std::is_enum_v<E>>> {
-    inline static constexpr bool available = true;
-    using underlying_type = std::underlying_type_t<E>;
-    using word_type = unsigned_word_for_size_t<sizeof(E)>;
-
-    template <auto Candidate>
-    static constexpr bool accepts()
-    {
-        constexpr word_type       bits = static_cast<word_type>(Candidate);
-        constexpr underlying_type value = bit_cast<underlying_type>(bits);
-        return !is_named_enum_value<E, static_cast<E>(value)>();
-    }
-
-    template <std::size_t Index>
-    static constexpr word_type candidate()
-    {
-        if constexpr (sizeof(E) == 1U) {
-            return static_cast<word_type>(Index);
-        } else if constexpr (Index == 0U) {
-            constexpr underlying_type value = automatic_sentinel<E>::value;
-            return bit_cast<word_type>(value);
-        } else {
-            constexpr underlying_type value = hashed_enum_candidate<E, Index>;
-            return bit_cast<word_type>(value);
-        }
-    }
-};
-
-template <class T, auto Candidate>
-constexpr bool accepts_niche_candidate()
-{
-    using type = unqualified_t<T>;
-    if constexpr (!niche_domain<type>::available) {
-        return false;
-    } else {
-        return niche_domain<type>::template accepts<Candidate>();
-    }
-}
-
-template <std::size_t TargetSize, class StorageWord, auto Candidate>
-constexpr auto project_storage_candidate()
-{
-    static_assert(TargetSize <= sizeof(StorageWord));
-    using projected_word = unsigned_word_for_size_t<TargetSize>;
-
-    constexpr auto storage_bytes = representation_bytes(static_cast<StorageWord>(Candidate));
-    fixed_array<byte, TargetSize> projected_bytes{};
-
-    for (std::size_t index = 0; index < TargetSize; ++index)
-        projected_bytes[index] = storage_bytes[index];
-
-    return bit_cast<projected_word>(projected_bytes);
-}
-
-template <class T, class StorageWord, auto Candidate>
-constexpr bool accepts_storage_niche_candidate()
-{
-    using type = unqualified_t<T>;
-    static_assert(sizeof(type) <= sizeof(StorageWord));
-    static_assert(unsigned_word_for_size<sizeof(type)>::supported);
-
-    constexpr auto projected = project_storage_candidate<sizeof(type), StorageWord, Candidate>();
-
-    if constexpr (!niche_domain<type>::available) {
-        return false;
-    } else {
-        return niche_domain<type>::template accepts<projected>();
-    }
-}
-
-template <class StorageWord, class Source, std::size_t Index>
-constexpr StorageWord expand_source_candidate()
-{
-    constexpr auto source_candidate =
-        niche_domain<unqualified_t<Source>>::template candidate<Index>();
-    constexpr auto source_bytes = representation_bytes(source_candidate);
-
-    auto storage_bytes = representation_bytes(static_cast<StorageWord>(
-        splitmix64(enum_type_hash<unqualified_t<Source>> + static_cast<std::uint64_t>(Index))));
-
-    for (std::size_t index = 0; index < source_bytes.size(); ++index)
-        storage_bytes[index] = source_bytes[index];
-
-    return bit_cast<StorageWord>(storage_bytes);
-}
-
-template <class Word>
-struct common_niche_search_result {
-    bool found;
-    Word value;
-};
-
-template <class Word, class Source, std::size_t Index, class... Ts>
-constexpr common_niche_search_result<Word> search_source_niches()
-{
-    if constexpr (Index == 256U) {
-        return {false, Word{}};
-    } else {
-        constexpr Word candidate = expand_source_candidate<Word, Source, Index>();
-
-        if constexpr ((accepts_storage_niche_candidate<Ts, Word, candidate>() && ...)) {
-            return {true, candidate};
-        } else {
-            return search_source_niches<Word, Source, Index + 1U, Ts...>();
-        }
-    }
-}
-
-template <class Word, class... Ts>
-constexpr common_niche_search_result<Word> find_common_niche()
-{
-    common_niche_search_result<Word> result{false, Word{}};
-
-    auto try_source = [&]<class Source>() constexpr {
-        if (!result.found) result = search_source_niches<Word, Source, 0U, Ts...>();
-    };
-
-    (try_source.template operator()<Ts>(), ...);
-    return result;
-}
-
-template <class... Ts>
-constexpr std::size_t maximum_size();
-
-template <class... Ts>
-struct common_niche_info;
-
-template <>
-struct common_niche_info<> {
-    inline static constexpr bool available = false;
-};
-
-template <class First, class... Rest>
-struct common_niche_info<First, Rest...> {
-    using first_type = unqualified_t<First>;
-    inline static constexpr std::size_t storage_size = maximum_size<First, Rest...>();
-    using word_type = unsigned_word_for_size_t<storage_size>;
-
-    inline static constexpr bool structural_candidate =
-        unsigned_word_for_size<storage_size>::supported &&
-        (unsigned_word_for_size<sizeof(unqualified_t<First>)>::supported && ... &&
-         unsigned_word_for_size<sizeof(unqualified_t<Rest>)>::supported) &&
-        (std::is_scalar_v<unqualified_t<First>> && ... && std::is_scalar_v<unqualified_t<Rest>>) &&
-        (std::is_trivially_copyable_v<unqualified_t<First>> && ... &&
-         std::is_trivially_copyable_v<unqualified_t<Rest>>) &&
-        (std::is_trivially_destructible_v<unqualified_t<First>> && ... &&
-         std::is_trivially_destructible_v<unqualified_t<Rest>>) &&
-        (niche_domain<unqualified_t<First>>::available && ... &&
-         niche_domain<unqualified_t<Rest>>::available);
-
-    inline static constexpr common_niche_search_result<word_type> search_result = []() constexpr {
-        if constexpr (structural_candidate) {
-            return find_common_niche<word_type, First, Rest...>();
-        } else {
-            return common_niche_search_result<word_type>{false, word_type{}};
-        }
-    }();
-
-    inline static constexpr bool      available = structural_candidate && search_result.found;
-    inline static constexpr word_type value = search_result.value;
-};
-
-template <class Info, bool = Info::available>
-struct common_niche_metadata {};
-
-template <class Info>
-struct common_niche_metadata<Info, true> {
-    using common_sentinel_type = typename Info::word_type;
-    inline static constexpr common_sentinel_type common_sentinel_representation = Info::value;
-};
-
-template <std::size_t Count>
-using compact_index_t =
-    std::conditional_t<(Count <= 0x100ULL), std::uint8_t,
-                       std::conditional_t<(Count <= 0x1'0000ULL), std::uint16_t, std::size_t>>;
-
-template <std::size_t Index, class... Ts>
-using alternative_t = nth_type_t<Index, Ts...>;
-
-template <class T, class... Ts>
-inline constexpr std::size_t type_count_v =
-    (std::size_t{0} + ... + (std::is_same_v<T, Ts> ? 1U : 0U));
-
-template <class T, class First, class... Rest>
-constexpr std::size_t unique_type_index()
-{
-    if constexpr (std::is_same_v<T, First>) {
-        return 0U;
-    } else {
-        static_assert(sizeof...(Rest) > 0U, "Requested type is not an alternative");
-        return 1U + unique_type_index<T, Rest...>();
-    }
-}
-
-template <class... Ts>
-constexpr std::size_t maximum_size()
-{
-    std::size_t value = 1U;
-    ((value = value < sizeof(Ts) ? sizeof(Ts) : value), ...);
-    return value;
-}
-
-template <class... Ts>
-constexpr std::size_t maximum_alignment()
-{
-    std::size_t value = 1U;
-    ((value = value < alignof(Ts) ? alignof(Ts) : value), ...);
-    return value;
-}
-
-template <class... Ts>
-class common_niche_multi_storage {
-private:
-    using niche_info = common_niche_info<Ts...>;
-    using word_type = typename niche_info::word_type;
-    using index_type = compact_index_t<sizeof...(Ts)>;
-
-    static_assert(niche_info::available);
-    static_assert(
-        (accepts_storage_niche_candidate<Ts, typename niche_info::word_type, niche_info::value>() &&
-         ...));
-
-    inline static constexpr auto        EMPTY_BYTES = representation_bytes(niche_info::value);
-    inline static constexpr std::size_t STORAGE_SIZE = maximum_size<Ts...>();
-
-    alignas(maximum_alignment<Ts...>()) fixed_array<byte, STORAGE_SIZE> m_storage{};
-    index_type m_index{};
-
-    template <std::size_t Index>
-    using type_at = alternative_t<Index, Ts...>;
-
-    template <std::size_t Index>
-    [[nodiscard]] type_at<Index> *ptr() noexcept
-    {
-        return launder(reinterpret_cast<type_at<Index> *>(m_storage.data()));
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] const type_at<Index> *ptr() const noexcept
-    {
-        return launder(reinterpret_cast<const type_at<Index> *>(m_storage.data()));
-    }
-
-    constexpr void write_empty() noexcept
-    {
-        m_storage = EMPTY_BYTES;
-    }
-
-    template <class T>
-    [[nodiscard]] static bool has_reserved_representation(const T &value) noexcept
-    {
-        fixed_array<byte, sizeof(T)> value_bytes{};
-        fixed_array<byte, sizeof(T)> empty_prefix{};
-        memcpy(value_bytes.data(), addressof(value), sizeof(T));
-
-        for (std::size_t index = 0; index < sizeof(T); ++index)
-            empty_prefix[index] = EMPTY_BYTES[index];
-
-        return value_bytes == empty_prefix;
-    }
-
-    template <std::size_t Index = 0U>
-    void destroy_active() noexcept
-    {
-        if constexpr (Index < sizeof...(Ts)) {
-            if (static_cast<std::size_t>(m_index) == Index) {
-                destroy_at(ptr<Index>());
-            } else {
-                destroy_active<Index + 1U>();
-            }
-        }
-    }
-
-public:
-    inline static constexpr bool uses_common_niche = true;
-
-    constexpr common_niche_multi_storage() noexcept
-    {
-        write_empty();
-    }
-
-    constexpr common_niche_multi_storage(nullopt_t) noexcept : common_niche_multi_storage()
-    {
-    }
-
-    template <std::size_t Index, class... Args>
-    explicit common_niche_multi_storage(in_place_index_t<Index>, Args &&...args)
-        : common_niche_multi_storage()
-    {
-        emplace<Index>(forward<Args>(args)...);
-    }
-
-    common_niche_multi_storage(const common_niche_multi_storage &other) noexcept
-        : common_niche_multi_storage()
-    {
-        if (other.has_value()) {
-            memcpy(m_storage.data(), other.m_storage.data(), STORAGE_SIZE);
-            m_index = other.m_index;
-        }
-    }
-
-    common_niche_multi_storage(common_niche_multi_storage &&other) noexcept
-        : common_niche_multi_storage(other)
-    {
-    }
-
-    common_niche_multi_storage &operator=(const common_niche_multi_storage &other) noexcept
-    {
-        if (this != addressof(other)) {
-            if (other.has_value()) {
-                reset();
-                memcpy(m_storage.data(), other.m_storage.data(), STORAGE_SIZE);
-                m_index = other.m_index;
-            } else {
-                reset();
-            }
-        }
-        return *this;
-    }
-
-    common_niche_multi_storage &operator=(common_niche_multi_storage &&other) noexcept
-    {
-        return *this = other;
-    }
-
-    ~common_niche_multi_storage()
-    {
-        reset();
-    }
-
-    [[nodiscard]] constexpr bool has_value() const noexcept
-    {
-        return m_storage != EMPTY_BYTES;
-    }
-
-    explicit constexpr operator bool() const noexcept
-    {
-        return has_value();
-    }
-
-    [[nodiscard]] constexpr std::size_t index() const noexcept
-    {
-        return has_value() ? static_cast<std::size_t>(m_index) : variant_npos;
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] bool holds_alternative() const noexcept
-    {
-        static_assert(Index < sizeof...(Ts));
-        return index() == Index;
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] type_at<Index> &get() &
-    {
-        if (!holds_alternative<Index>()) bad_variant_access();
-
-        return *ptr<Index>();
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] const type_at<Index> &get() const &
-    {
-        if (!holds_alternative<Index>()) bad_variant_access();
-
-        return *ptr<Index>();
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] type_at<Index> &&get() &&
-    {
-        return move(get<Index>());
-    }
-
-    template <std::size_t Index, class... Args>
-    type_at<Index> &emplace(Args &&...args)
-    {
-        static_assert(Index < sizeof...(Ts));
-        using target_type = type_at<Index>;
-
-        target_type candidate(forward<Args>(args)...);
-        if (has_reserved_representation(candidate)) bad_sentinel_value_access();
-
-        reset();
-        memcpy(m_storage.data(), addressof(candidate), sizeof(target_type));
-        m_index = static_cast<index_type>(Index);
-        return *ptr<Index>();
-    }
-
-    void reset() noexcept
-    {
-        if (has_value()) destroy_active();
-
-        write_empty();
-    }
-
-    void swap(common_niche_multi_storage &other) noexcept
-    {
-        if (this == addressof(other)) return;
-
-        common_niche_multi_storage temporary(move(other));
-        other = move(*this);
-        *this = move(temporary);
-    }
-};
-
-#if !defined(RESULT_FREESTANDING)
-template <class... Ts>
-class variant_multi_storage {
-private:
-    using variant_type = std::variant<std::monostate, Ts...>;
-    variant_type m_storage;
-
-    template <std::size_t Index>
-    using type_at = alternative_t<Index, Ts...>;
-
-public:
-    inline static constexpr bool uses_common_niche = false;
-
-    constexpr variant_multi_storage() noexcept = default;
-    constexpr variant_multi_storage(nullopt_t) noexcept : m_storage(std::monostate{})
-    {
-    }
-
-    template <std::size_t Index, class... Args>
-    explicit constexpr variant_multi_storage(in_place_index_t<Index>, Args &&...args)
-        : m_storage(in_place_index<Index + 1U>, forward<Args>(args)...)
-    {
-        static_assert(Index < sizeof...(Ts));
-    }
-
-    variant_multi_storage(const variant_multi_storage &) = default;
-    variant_multi_storage(variant_multi_storage &&) = default;
-
-    ~variant_multi_storage() = default;
-
-    variant_multi_storage &operator=(const variant_multi_storage &) = default;
-    variant_multi_storage &operator=(variant_multi_storage &&) = default;
-
-    [[nodiscard]] constexpr bool has_value() const noexcept
-    {
-        return m_storage.index() != 0U;
-    }
-
-    explicit constexpr operator bool() const noexcept
-    {
-        return has_value();
-    }
-
-    [[nodiscard]] constexpr std::size_t index() const noexcept
-    {
-        return has_value() ? m_storage.index() - 1U : variant_npos;
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr bool holds_alternative() const noexcept
-    {
-        static_assert(Index < sizeof...(Ts));
-        return m_storage.index() == Index + 1U;
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr type_at<Index> &get() &
-    {
-        return std::get<Index + 1U>(m_storage);
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr const type_at<Index> &get() const &
-    {
-        return std::get<Index + 1U>(m_storage);
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr type_at<Index> &&get() &&
-    {
-        return std::get<Index + 1U>(move(m_storage));
-    }
-
-    template <std::size_t Index, class... Args>
-    constexpr type_at<Index> &emplace(Args &&...args)
-    {
-        static_assert(Index < sizeof...(Ts));
-        return m_storage.template emplace<Index + 1U>(forward<Args>(args)...);
-    }
-
-    constexpr void reset() noexcept
-    {
-        m_storage.template emplace<0U>();
-    }
-
-    constexpr void swap(variant_multi_storage &other) noexcept(
-        noexcept(m_storage.swap(other.m_storage)))
-    {
-        m_storage.swap(other.m_storage);
-    }
-};
-#else
-template <class... Ts>
-class variant_multi_storage {
-    static_assert(always_false_v<Ts...>,
-                  "RESULT_FREESTANDING tiny::multi_optional requires alternatives with a common "
-                  "implicit niche; the hosted std::variant fallback is disabled.");
-};
-#endif
-
-template <bool UseCommonNiche, class... Ts>
-struct multi_storage_selector;
-
-template <class... Ts>
-struct multi_storage_selector<true, Ts...> {
-    using type = common_niche_multi_storage<Ts...>;
-};
-
-template <class... Ts>
-struct multi_storage_selector<false, Ts...> {
-    using type = variant_multi_storage<Ts...>;
-};
-
-}  // namespace detail
-
-template <class... Ts>
-concept has_common_niche = sizeof...(Ts) > 0U && detail::common_niche_info<Ts...>::available;
-
-template <class... Ts>
-class multi_optional : public detail::common_niche_metadata<detail::common_niche_info<Ts...>> {
-private:
-    static_assert(sizeof...(Ts) > 0U, "tiny::multi_optional requires at least one alternative");
-    static_assert((std::is_object_v<Ts> && ...));
-    static_assert((!std::is_array_v<Ts> && ...));
-    static_assert((std::is_destructible_v<Ts> && ...));
-
-    using storage_type =
-        typename detail::multi_storage_selector<detail::common_niche_info<Ts...>::available,
-                                                Ts...>::type;
-
-    storage_type m_storage;
-
-public:
-    inline static constexpr bool        uses_common_niche = storage_type::uses_common_niche;
-    inline static constexpr std::size_t alternative_count = sizeof...(Ts);
-
-    constexpr multi_optional() noexcept(std::is_nothrow_default_constructible_v<storage_type>) =
-        default;
-    constexpr multi_optional(nullopt_t) noexcept : m_storage(nullopt)
-    {
-    }
-
-    template <std::size_t Index, class... Args>
-    explicit constexpr multi_optional(in_place_index_t<Index>, Args &&...args)
-        : m_storage(in_place_index<Index>, forward<Args>(args)...)
-    {
-        static_assert(Index < sizeof...(Ts));
-    }
-
-    template <class T, class... Args>
-        requires(detail::type_count_v<T, Ts...> == 1U)
-    explicit constexpr multi_optional(in_place_type_t<T>, Args &&...args)
-        : multi_optional(in_place_index<detail::unique_type_index<T, Ts...>()>,
-                         forward<Args>(args)...)
-    {
-    }
-
-    multi_optional(const multi_optional &) = default;
-    multi_optional(multi_optional &&) = default;
-
-    ~multi_optional() = default;
-
-    multi_optional &operator=(const multi_optional &) = default;
-    multi_optional &operator=(multi_optional &&) = default;
-
-    constexpr multi_optional &operator=(nullopt_t) noexcept
-    {
-        reset();
-        return *this;
-    }
-
-    [[nodiscard]] constexpr bool has_value() const noexcept
-    {
-        return m_storage.has_value();
-    }
-
-    explicit constexpr operator bool() const noexcept
-    {
-        return has_value();
-    }
-
-    [[nodiscard]] constexpr std::size_t index() const noexcept
-    {
-        return m_storage.index();
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr bool holds_alternative() const noexcept
-    {
-        return m_storage.template holds_alternative<Index>();
-    }
-
-    template <class T>
-        requires(detail::type_count_v<T, Ts...> == 1U)
-    [[nodiscard]] constexpr bool holds_alternative() const noexcept
-    {
-        return holds_alternative<detail::unique_type_index<T, Ts...>()>();
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr decltype(auto) get() &
-    {
-        return m_storage.template get<Index>();
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr decltype(auto) get() const &
-    {
-        return m_storage.template get<Index>();
-    }
-
-    template <std::size_t Index>
-    [[nodiscard]] constexpr decltype(auto) get() &&
-    {
-        return move(m_storage).template get<Index>();
-    }
-
-    template <class T>
-        requires(detail::type_count_v<T, Ts...> == 1U)
-    [[nodiscard]] constexpr T &get() &
-    {
-        return get<detail::unique_type_index<T, Ts...>()>();
-    }
-
-    template <class T>
-        requires(detail::type_count_v<T, Ts...> == 1U)
-    [[nodiscard]] constexpr const T &get() const &
-    {
-        return get<detail::unique_type_index<T, Ts...>()>();
-    }
-
-    template <std::size_t Index, class... Args>
-    constexpr decltype(auto) emplace(Args &&...args)
-    {
-        return m_storage.template emplace<Index>(forward<Args>(args)...);
-    }
-
-    template <class T, class... Args>
-        requires(detail::type_count_v<T, Ts...> == 1U)
-    constexpr T &emplace(Args &&...args)
-    {
-        return emplace<detail::unique_type_index<T, Ts...>()>(forward<Args>(args)...);
-    }
-
-    constexpr void reset() noexcept
-    {
-        m_storage.reset();
-    }
-
-    constexpr void swap(multi_optional &other) noexcept(noexcept(m_storage.swap(other.m_storage)))
-    {
-        m_storage.swap(other.m_storage);
-    }
-};
-
-template <std::size_t Index, class... Ts>
-[[nodiscard]] constexpr decltype(auto) get(multi_optional<Ts...> &value)
-{
-    return value.template get<Index>();
-}
-
-template <std::size_t Index, class... Ts>
-[[nodiscard]] constexpr decltype(auto) get(const multi_optional<Ts...> &value)
-{
-    return value.template get<Index>();
-}
-
-template <class T, class... Ts>
-[[nodiscard]] constexpr T &get(multi_optional<Ts...> &value)
-{
-    return value.template get<T>();
-}
-
-template <class T, class... Ts>
-[[nodiscard]] constexpr const T &get(const multi_optional<Ts...> &value)
-{
-    return value.template get<T>();
-}
-
-template <class T, class... Ts>
-[[nodiscard]] constexpr bool holds_alternative(const multi_optional<Ts...> &value) noexcept
-{
-    return value.template holds_alternative<T>();
-}
-
-template <class... Ts>
-constexpr void swap(multi_optional<Ts...> &left,
-                    multi_optional<Ts...> &right) noexcept(noexcept(left.swap(right)))
-{
-    left.swap(right);
+    lhs.swap(rhs);
 }
 
 }  // namespace storage
@@ -2906,6 +2032,14 @@ class result_storage {
     union data_union {
         wrapper::Ok<T>  ok;
         wrapper::Err<E> err;
+
+        data_union() noexcept
+        {
+        }
+
+        ~data_union()
+        {
+        }
     } m_data;
 
     bool m_ok;
@@ -2941,13 +2075,15 @@ class result_storage {
 
 public:
     template <typename U, std::enable_if_t<resolve_plan<T, U>::legal, int> = 0>
-    explicit result_storage(wrapper::Ok<U> ok) : m_ok(true)
+    explicit result_storage(wrapper::Ok<U> ok)
+        : m_ok(true)
     {
         construct_at(addressof(m_data.ok), resolve_ok<T>(move(ok)));
     }
 
     template <typename G, std::enable_if_t<resolve_plan<E, G>::legal, int> = 0>
-    explicit result_storage(wrapper::Err<G> err) : m_ok(false)
+    explicit result_storage(wrapper::Err<G> err)
+        : m_ok(false)
     {
         construct_at(addressof(m_data.err), resolve_err<E>(move(err)));
     }
@@ -3245,11 +2381,13 @@ class result_storage<void, void> {
     bool m_ok;
 
 public:
-    explicit result_storage(wrapper::Ok<void>) noexcept : m_ok(true)
+    explicit result_storage(wrapper::Ok<void>) noexcept
+        : m_ok(true)
     {
     }
 
-    explicit result_storage(wrapper::Err<void>) noexcept : m_ok(false)
+    explicit result_storage(wrapper::Err<void>) noexcept
+        : m_ok(false)
     {
     }
 
@@ -3322,12 +2460,14 @@ public:
     using err_type = E;
 
     template <typename U, std::enable_if_t<detail::resolve_plan<T, U>::legal, int> = 0>
-    Result(wrapper::Ok<U> ok) : storage(detail::move(ok))
+    Result(wrapper::Ok<U> ok)
+        : storage(detail::move(ok))
     {
     }
 
     template <typename G, std::enable_if_t<detail::resolve_plan<E, G>::legal, int> = 0>
-    Result(wrapper::Err<G> err) : storage(detail::move(err))
+    Result(wrapper::Err<G> err)
+        : storage(detail::move(err))
     {
     }
 
@@ -3360,7 +2500,8 @@ public:
     template <typename U = T, std::enable_if_t<!std::is_void_v<U>, int> = 0>
     decltype(auto) unwrap_ref() &
     {
-        if (!is_ok()) RESULT_ERROR("Tried to unwrap_ref a Result containing an error");
+        if (!is_ok())
+            RESULT_ERROR("Tried to unwrap_ref a Result containing an error");
 
         return storage_ref().ok_ref();
     }
@@ -3368,7 +2509,8 @@ public:
     template <typename U = T, std::enable_if_t<!std::is_void_v<U>, int> = 0>
     decltype(auto) unwrap_ref() const &
     {
-        if (!is_ok()) RESULT_ERROR("Tried to unwrap_ref a Result containing an error");
+        if (!is_ok())
+            RESULT_ERROR("Tried to unwrap_ref a Result containing an error");
 
         return storage_ref().ok_ref();
     }
@@ -3376,7 +2518,8 @@ public:
     template <typename G = E, std::enable_if_t<!std::is_void_v<G>, int> = 0>
     decltype(auto) unwrap_err_ref() &
     {
-        if (!is_err()) RESULT_ERROR("Tried to unwrap_err_ref an Ok Result");
+        if (!is_err())
+            RESULT_ERROR("Tried to unwrap_err_ref an Ok Result");
 
         return storage_ref().err_ref();
     }
@@ -3384,7 +2527,8 @@ public:
     template <typename G = E, std::enable_if_t<!std::is_void_v<G>, int> = 0>
     decltype(auto) unwrap_err_ref() const &
     {
-        if (!is_err()) RESULT_ERROR("Tried to unwrap_err_ref an Ok Result");
+        if (!is_err())
+            RESULT_ERROR("Tried to unwrap_err_ref an Ok Result");
 
         return storage_ref().err_ref();
     }
@@ -3396,7 +2540,8 @@ public:
     template <typename U = T, std::enable_if_t<std::is_void_v<U>, int> = 0>
     void unwrap() const &
     {
-        if (!is_ok()) RESULT_ERROR("Tried to unwrap a Result containing an error");
+        if (!is_ok())
+            RESULT_ERROR("Tried to unwrap a Result containing an error");
     }
 
     template <typename U = T, std::enable_if_t<std::is_void_v<U>, int> = 0>
@@ -3407,7 +2552,8 @@ public:
     template <typename G = E, std::enable_if_t<std::is_void_v<G>, int> = 0>
     void unwrap_err() const &
     {
-        if (!is_err()) RESULT_ERROR("Tried to unwrap_err an Ok Result");
+        if (!is_err())
+            RESULT_ERROR("Tried to unwrap_err an Ok Result");
     }
 
     template <typename G = E, std::enable_if_t<std::is_void_v<G>, int> = 0>
@@ -3417,26 +2563,32 @@ public:
 
     decltype(auto) unwrap() &&
     {
-        if (!is_ok()) RESULT_ERROR("Tried to unwrap a Result containing an error");
+        if (!is_ok())
+            RESULT_ERROR("Tried to unwrap a Result containing an error");
 
-        if constexpr (!std::is_void_v<T>) return detail::move(*this).storage_ref().take_ok();
+        if constexpr (!std::is_void_v<T>)
+            return detail::move(*this).storage_ref().take_ok();
     }
 
     decltype(auto) unwrap_unchecked() &&
     {
-        if constexpr (!std::is_void_v<T>) return detail::move(*this).storage_ref().take_ok();
+        if constexpr (!std::is_void_v<T>)
+            return detail::move(*this).storage_ref().take_ok();
     }
 
     decltype(auto) unwrap_err() &&
     {
-        if (!is_err()) RESULT_ERROR("Tried to unwrap_err an Ok Result");
+        if (!is_err())
+            RESULT_ERROR("Tried to unwrap_err an Ok Result");
 
-        if constexpr (!std::is_void_v<E>) return detail::move(*this).storage_ref().take_err();
+        if constexpr (!std::is_void_v<E>)
+            return detail::move(*this).storage_ref().take_err();
     }
 
     decltype(auto) unwrap_err_unchecked() &&
     {
-        if constexpr (!std::is_void_v<E>) return detail::move(*this).storage_ref().take_err();
+        if constexpr (!std::is_void_v<E>)
+            return detail::move(*this).storage_ref().take_err();
     }
 
     template <typename U = T, std::enable_if_t<!std::is_void_v<U>, int> = 0>
@@ -3492,15 +2644,18 @@ public:
     template <typename Message, typename U = T, std::enable_if_t<std::is_void_v<U>, int> = 0>
     void expect(const Message &message) const &
     {
-        if (!is_ok()) RESULT_ERROR(message);
+        if (!is_ok())
+            RESULT_ERROR(message);
     }
 
     template <typename Message>
     decltype(auto) expect(const Message &message) &&
     {
-        if (!is_ok()) RESULT_ERROR(message);
+        if (!is_ok())
+            RESULT_ERROR(message);
 
-        if constexpr (!std::is_void_v<T>) return detail::move(*this).storage_ref().take_ok();
+        if constexpr (!std::is_void_v<T>)
+            return detail::move(*this).storage_ref().take_ok();
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -3547,7 +2702,8 @@ public:
 
         static_assert(PropagateOk::legal, "map_err cannot propagate this Result's Ok branch.");
 
-        if (is_ok()) return PropagateOk::template apply<Output>(detail::move(*this).storage_ref());
+        if (is_ok())
+            return PropagateOk::template apply<Output>(detail::move(*this).storage_ref());
 
         if constexpr (std::is_void_v<RawReturn>) {
             Call::apply(detail::move(*this).storage_ref(), detail::forward<Fn>(fn));
@@ -3701,7 +2857,8 @@ public:
     template <typename U>
     bool operator==(const wrapper::Ok<U> &ok) const
     {
-        if (!is_ok()) return false;
+        if (!is_ok())
+            return false;
 
         if constexpr (std::is_void_v<T> || std::is_void_v<U>) {
             return std::is_void_v<T> && std::is_void_v<U>;
@@ -3719,7 +2876,8 @@ public:
     template <typename G>
     bool operator==(const wrapper::Err<G> &err) const
     {
-        if (!is_err()) return false;
+        if (!is_err())
+            return false;
 
         if constexpr (std::is_void_v<E> || std::is_void_v<G>) {
             return std::is_void_v<E> && std::is_void_v<G>;
@@ -3737,7 +2895,8 @@ public:
     template <typename U, typename G>
     bool operator==(const Result<U, G> &other) const
     {
-        if (is_ok() != other.is_ok()) return false;
+        if (is_ok() != other.is_ok())
+            return false;
 
         if (is_ok()) {
             if constexpr (std::is_void_v<T> || std::is_void_v<U>) {

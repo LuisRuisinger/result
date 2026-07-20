@@ -30,6 +30,12 @@ BraceWrapping:
 
 AllowShortFunctionsOnASingleLine: None
 AllowShortEnumsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+ConstructorInitializerIndentWidth: 4
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never
 
 AlignConsecutiveMacros:
   Enabled: true
