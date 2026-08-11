@@ -2226,14 +2226,6 @@ public:
 // Specialized storage, uniform interface
 // =================================================================================================
 
-// =================================================================================================
-// Optional detection, for transpose
-//
-// Deliberately open: transpose works with std::optional today, and with any other optional that
-// declares itself here. rebind drops the source policy on purpose - the new payload is a Result,
-// which needs its own storage decision rather than the one made for the old payload.
-// =================================================================================================
-
 template <typename T>
 struct optional_traits {
     static constexpr bool is_optional = false;
