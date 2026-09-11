@@ -3,12 +3,6 @@
 #ifndef LRUSINGER_RESULT_INCLUDE_RESULT_RESULT_HPP_
 #define LRUSINGER_RESULT_INCLUDE_RESULT_RESULT_HPP_
 
-#if !defined(__clang__) && !defined(__GNUC__)
-#    error "Result requires GCC or Clang."
-#endif
-
-#include <bit>
-#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -32,8 +26,18 @@
 #    define RESULT_HAS_HOSTED_EXCEPTIONS 0
 #endif
 
-#if !defined(__cplusplus) || __cplusplus < 202002L
-#    error "Result<T, E> implementation requires C++20 or later."
+#if defined(_MSVC_LANG)  // afaik MVSC might not define __cplusplus on older versions
+#    define RESULT_CPLUSPLUS _MSVC_LANG
+#else
+#    define RESULT_CPLUSPLUS __cplusplus
+#endif
+
+#define RESULT_AT_LEAST_CPP17 (RESULT_CPLUSPLUS >= 201703L)
+#define RESULT_AT_LEAST_CPP20 (RESULT_CPLUSPLUS >= 202002L)
+#define RESULT_AT_LEAST_CPP23 (RESULT_CPLUSPLUS >= 202302L)
+
+#if !RESULT_AT_LEAST_CPP17
+#    error "Result<T, E> requires C++17 or later."
 #endif
 
 // =================================================================================================
@@ -63,9 +67,11 @@ struct panic_info {
 
 namespace detail {
 
-[[noreturn]] inline void default_panic(const panic_info &info) noexcept
+[[noreturn]] inline void panic(const char *message, const char *file, int line) noexcept
 {
+    const panic_info info{message, file, line};
     (void)info;
+
 #if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
     __builtin_trap();
 #else
@@ -73,49 +79,34 @@ namespace detail {
 #endif
 }
 
-template <typename Message>
-[[noreturn]] void panic(const Message &message, const char *file, int line) noexcept
-{
-    if constexpr (std::is_convertible_v<const Message &, const char *>) {
-        const char *msg_str = static_cast<const char *>(message);
-#ifdef RESULT_CUSTOM_PANIC
-        RESULT_CUSTOM_PANIC(panic_info{msg_str, file, line});
-#else
-        default_panic(panic_info{msg_str, file, line});
-#endif
-    } else {
-#ifdef RESULT_CUSTOM_PANIC
-        RESULT_CUSTOM_PANIC(panic_info{"assertion failed", file, line});
-#else
-        default_panic(panic_info{"assertion failed", file, line});
-#endif
-    }
-}
-
 }  // namespace detail
 }  // namespace lsr::result
 
 #ifndef RESULT_ERROR
-#    define RESULT_DETAIL_DEFINED_RESULT_ERROR 1
-#    define RESULT_ERROR(_m) ::lsr::result::detail::panic((_m), __FILE__, __LINE__)
+#    define RESULT_DETAIL_DEFINED_RESULT_ERROR
+#    define RESULT_ERROR(_msg) ::lsr::result::detail::panic((_msg), __FILE__, __LINE__)
 #endif
 
 #ifndef RESULT_ASSERT
-#    define RESULT_DETAIL_DEFINED_RESULT_ASSERT 1
+#    define RESULT_DETAIL_DEFINED_RESULT_ASSERT
 #    if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
 #        ifdef NDEBUG
 #            define RESULT_ASSERT(_condition) ((void)0)
 #        else
-#            define RESULT_ASSERT(_condition)         \
-            do {                                      \
-                if (!(_condition)) {                  \
-                    RESULT_ERROR("assertion failed"); \
-                }                                     \
-            } while (0)
+#            define RESULT_ASSERT(_condition)             \
+                do {                                      \
+                    if (!(_condition)) {                  \
+                        RESULT_ERROR("assertion failed"); \
+                    }                                     \
+                } while (0)
 #        endif
 #    else
 #        define RESULT_ASSERT(_condition) assert(_condition)
 #    endif
+#endif
+
+#ifndef __has_builtin
+#    define __has_builtin(x) 0
 #endif
 
 namespace lsr::result {
@@ -194,6 +185,16 @@ template <typename T>
 std::add_rvalue_reference_t<T> declval() noexcept;
 #else
 using std::declval;
+#endif
+
+#if defined(_WIN32)
+inline constexpr bool native_little_endian = true;
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
+inline constexpr bool native_little_endian = (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
+#elif defined(__LITTLE_ENDIAN__) && !defined(__BIG_ENDIAN__)
+inline constexpr bool native_little_endian = true;
+#else
+inline constexpr bool native_little_endian = false;
 #endif
 
 template <typename T, std::size_t N>
@@ -280,9 +281,10 @@ inline void *memcpy(void *destination, const void *source, std::size_t size) noe
 using std::memcpy;
 #endif
 
-#if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
-template <typename T, typename... Args>
-    requires std::constructible_from<T, Args...>
+// std::construct_at does not exist before cpp17
+#if (!defined(__STDC_HOSTED__) || !__STDC_HOSTED__) || !RESULT_AT_LEAST_CPP20
+template <typename T, typename... Args,
+          std::enable_if_t<std::is_constructible_v<T, Args...>, int> = 0>
 constexpr T *construct_at(T *location,
                           Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args...>)
 {
@@ -340,7 +342,7 @@ decltype(auto) invoke_member_object(MemberPtr pointer, Obj &&object)
 template <typename Fn, typename... Args>
 decltype(auto) invoke(Fn &&fn, Args &&...args)
 {
-    using callable = std::remove_cvref_t<Fn>;
+    using callable = std::remove_cv_t<std::remove_reference_t<Fn>>;
 
     if constexpr (std::is_member_function_pointer_v<callable>) {
         return invoke_member_function(forward<Fn>(fn), forward<Args>(args)...);
@@ -975,8 +977,7 @@ struct ok_propagation_plan<Src, Tgt, Storage, true> {
     template <typename Output>
     static Output apply(Storage &&)
     {
-        static_assert(legal,
-                      "Void Ok branch cannot be propagated to the target Result.");
+        static_assert(legal, "Void Ok branch cannot be propagated to the target Result.");
         return Output(Ok());
     }
 };
@@ -994,8 +995,7 @@ struct err_propagation_plan<Src, Tgt, Storage, false> {
     template <typename Output>
     static Output apply(Storage &&storage)
     {
-        static_assert(legal,
-                      "Err branch cannot be propagated to the target Result.");
+        static_assert(legal, "Err branch cannot be propagated to the target Result.");
         return Output(Err(move(storage).take_err()));
     }
 };
@@ -1007,8 +1007,7 @@ struct err_propagation_plan<Src, Tgt, Storage, true> {
     template <typename Output>
     static Output apply(Storage &&)
     {
-        static_assert(legal,
-                      "Void Err branch cannot be propagated to the target Result.");
+        static_assert(legal, "Void Err branch cannot be propagated to the target Result.");
         return Output(Err());
     }
 };
@@ -1049,6 +1048,223 @@ public:
 };
 #endif
 
+template <typename From, typename To, typename = void>
+struct convertible_to_impl : std::false_type {};
+
+template <typename From, typename To>
+struct convertible_to_impl<From, To, std::void_t<decltype(static_cast<To>(declval<From>()))>>
+    : std::bool_constant<std::is_convertible_v<From, To>> {};
+
+template <typename From, typename To>
+inline constexpr bool convertible_to_v = convertible_to_impl<From, To>::value;
+
+template <typename T, typename... Args>
+inline constexpr bool constructible_from_v =
+    std::is_destructible_v<T> && std::is_constructible_v<T, Args...>;
+
+template <typename T>
+inline constexpr bool move_constructible_v = constructible_from_v<T, T> && convertible_to_v<T, T>;
+
+template <typename T>
+inline constexpr bool copy_constructible_v =
+    move_constructible_v<T> && constructible_from_v<T, T &> && convertible_to_v<T &, T> &&
+    constructible_from_v<T, const T &> && convertible_to_v<const T &, T> &&
+    constructible_from_v<T, const T> && convertible_to_v<const T, T>;
+
+struct copy_construct_tag {};
+struct move_construct_tag {};
+
+template <typename Base, bool Enabled, bool Trivial>
+class copy_ctor_layer;
+
+template <typename Base>
+class copy_ctor_layer<Base, true, true> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    copy_ctor_layer(const copy_ctor_layer &) = default;
+    copy_ctor_layer(copy_ctor_layer &&) = default;
+    copy_ctor_layer &operator=(const copy_ctor_layer &) = default;
+    copy_ctor_layer &operator=(copy_ctor_layer &&) = default;
+    ~copy_ctor_layer() = default;
+};
+
+template <typename Base>
+class copy_ctor_layer<Base, true, false> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    copy_ctor_layer(const copy_ctor_layer &other)
+        : Base(copy_construct_tag{}, other)
+    {
+    }
+
+    copy_ctor_layer(copy_ctor_layer &&) = default;
+    copy_ctor_layer &operator=(const copy_ctor_layer &) = default;
+    copy_ctor_layer &operator=(copy_ctor_layer &&) = default;
+    ~copy_ctor_layer() = default;
+};
+
+template <typename Base, bool Trivial>
+class copy_ctor_layer<Base, false, Trivial> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    copy_ctor_layer(const copy_ctor_layer &) = delete;
+    copy_ctor_layer(copy_ctor_layer &&) = default;
+    copy_ctor_layer &operator=(const copy_ctor_layer &) = default;
+    copy_ctor_layer &operator=(copy_ctor_layer &&) = default;
+    ~copy_ctor_layer() = default;
+};
+
+template <typename Base, bool Enabled, bool Trivial>
+class move_ctor_layer;
+
+template <typename Base>
+class move_ctor_layer<Base, true, true> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    move_ctor_layer(const move_ctor_layer &) = default;
+    move_ctor_layer(move_ctor_layer &&) = default;
+    move_ctor_layer &operator=(const move_ctor_layer &) = default;
+    move_ctor_layer &operator=(move_ctor_layer &&) = default;
+    ~move_ctor_layer() = default;
+};
+
+template <typename Base>
+class move_ctor_layer<Base, true, false> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    move_ctor_layer(const move_ctor_layer &) = default;
+
+    move_ctor_layer(move_ctor_layer &&other) noexcept(noexcept(Base(move_construct_tag{},
+                                                                    move(other))))
+        : Base(move_construct_tag{}, move(other))
+    {
+    }
+
+    move_ctor_layer &operator=(const move_ctor_layer &) = default;
+    move_ctor_layer &operator=(move_ctor_layer &&) = default;
+    ~move_ctor_layer() = default;
+};
+
+template <typename Base, bool Trivial>
+class move_ctor_layer<Base, false, Trivial> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    move_ctor_layer(const move_ctor_layer &) = default;
+    move_ctor_layer(move_ctor_layer &&) = delete;
+    move_ctor_layer &operator=(const move_ctor_layer &) = default;
+    move_ctor_layer &operator=(move_ctor_layer &&) = default;
+    ~move_ctor_layer() = default;
+};
+
+template <typename Base, bool Enabled, bool Trivial>
+class copy_assign_layer;
+
+template <typename Base>
+class copy_assign_layer<Base, true, true> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    copy_assign_layer(const copy_assign_layer &) = default;
+    copy_assign_layer(copy_assign_layer &&) = default;
+    copy_assign_layer &operator=(const copy_assign_layer &) = default;
+    copy_assign_layer &operator=(copy_assign_layer &&) = default;
+    ~copy_assign_layer() = default;
+};
+
+template <typename Base>
+class copy_assign_layer<Base, true, false> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    copy_assign_layer(const copy_assign_layer &) = default;
+    copy_assign_layer(copy_assign_layer &&) = default;
+
+    copy_assign_layer &operator=(const copy_assign_layer &other)
+    {
+        this->copy_assign_from(other);
+        return *this;
+    }
+
+    copy_assign_layer &operator=(copy_assign_layer &&) = default;
+    ~copy_assign_layer() = default;
+};
+
+template <typename Base, bool Trivial>
+class copy_assign_layer<Base, false, Trivial> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    copy_assign_layer(const copy_assign_layer &) = default;
+    copy_assign_layer(copy_assign_layer &&) = default;
+    copy_assign_layer &operator=(const copy_assign_layer &) = delete;
+    copy_assign_layer &operator=(copy_assign_layer &&) = default;
+    ~copy_assign_layer() = default;
+};
+
+template <typename Base, bool Enabled, bool Trivial>
+class move_assign_layer;
+
+template <typename Base>
+class move_assign_layer<Base, true, true> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    move_assign_layer(const move_assign_layer &) = default;
+    move_assign_layer(move_assign_layer &&) = default;
+    move_assign_layer &operator=(const move_assign_layer &) = default;
+    move_assign_layer &operator=(move_assign_layer &&) = default;
+    ~move_assign_layer() = default;
+};
+
+template <typename Base>
+class move_assign_layer<Base, true, false> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    move_assign_layer(const move_assign_layer &) = default;
+    move_assign_layer(move_assign_layer &&) = default;
+    move_assign_layer &operator=(const move_assign_layer &) = default;
+
+    move_assign_layer &operator=(move_assign_layer &&other) noexcept(
+        noexcept(this->move_assign_from(move(other))))
+    {
+        this->move_assign_from(move(other));
+        return *this;
+    }
+
+    ~move_assign_layer() = default;
+};
+
+template <typename Base, bool Trivial>
+class move_assign_layer<Base, false, Trivial> : public Base {
+public:
+    using Base::Base;
+    using Base::operator=;
+
+    move_assign_layer(const move_assign_layer &) = default;
+    move_assign_layer(move_assign_layer &&) = default;
+    move_assign_layer &operator=(const move_assign_layer &) = default;
+    move_assign_layer &operator=(move_assign_layer &&) = delete;
+    ~move_assign_layer() = default;
+};
+
 // =================================================================================================
 // Optional storage
 // =================================================================================================
@@ -1063,6 +1279,12 @@ namespace detail {
 template <typename T>
 using unqualified_t = std::remove_cv_t<T>;
 
+template <typename Policy, typename = void>
+struct has_sound_member : std::false_type {};
+
+template <typename Policy>
+struct has_sound_member<Policy, std::void_t<decltype(Policy::sound)>> : std::true_type {};
+
 #if !defined(__STDC_HOSTED__) || !__STDC_HOSTED__
 template <typename T>
 constexpr void swap(T &lhs, T &rhs) noexcept(std::is_nothrow_move_constructible_v<T> &&
@@ -1076,11 +1298,13 @@ constexpr void swap(T &lhs, T &rhs) noexcept(std::is_nothrow_move_constructible_
 using std::swap;
 #endif
 
-template <typename Representation>
-constexpr auto representation_bytes(Representation representation) noexcept
+template <typename Repr>
+inline auto representation_bytes(Repr repr) noexcept
 {
-    static_assert(std::is_trivially_copyable_v<Representation>);
-    return std::bit_cast<fixed_array<byte, sizeof(Representation)>>(representation);
+    static_assert(std::is_trivially_copyable_v<Repr>);
+    fixed_array<byte, sizeof(Repr)> bytes{};
+    memcpy(bytes.data(), addressof(repr), sizeof(Repr));
+    return bytes;
 }
 
 constexpr bool contains(sentinel_string_view text, sentinel_string_view token) noexcept
@@ -1088,7 +1312,7 @@ constexpr bool contains(sentinel_string_view text, sentinel_string_view token) n
     return text.find(token) != sentinel_string_view::npos;
 }
 
-constexpr sentinel_string_view enum_argument_fragment(sentinel_string_view signature) noexcept
+constexpr sentinel_string_view enum_argument_fragment_gnu(sentinel_string_view signature) noexcept
 {
     constexpr sentinel_string_view marker = "Value = ";
     const std::size_t              marker_position = signature.find(marker);
@@ -1109,10 +1333,52 @@ constexpr sentinel_string_view enum_argument_fragment(sentinel_string_view signa
     return signature.substr(begin, end - begin);
 }
 
+constexpr sentinel_string_view enum_argument_fragment_msvc(sentinel_string_view signature) noexcept
+{
+    constexpr sentinel_string_view suffix = ">(void)";
+
+    const auto end = signature.rfind(suffix);
+    if (end == sentinel_string_view::npos)
+        return {};
+
+    std::size_t depth = 0;
+    for (std::size_t i = end; i > 0; --i) {
+        const char c = signature[i - 1];
+
+        if (c == '>') {
+            ++depth;
+        } else if (c == '<') {
+            if (depth != 0)
+                --depth;
+        } else if (c == ',' && depth == 0) {
+            return signature.substr(i, end - i);
+        }
+    }
+
+    return {};
+}
+
+constexpr sentinel_string_view enum_argument_fragment(sentinel_string_view signature) noexcept
+{
+#if defined(__clang__) || defined(__GNUC__)
+    return enum_argument_fragment_gnu(signature);
+#elif defined(_MSC_VER)
+    return enum_argument_fragment_msvc(signature);
+#else
+    return {};
+#endif
+}
+
 template <typename E, E Value>
 constexpr sentinel_string_view enum_value_signature()
 {
+#if defined(__clang__) || defined(__GNUC__)
     return __PRETTY_FUNCTION__;
+#elif defined(_MSC_VER)
+    return __FUNCSIG__;
+#else
+    static_assert(always_false_v<E>, "Automatic enum reflection is unsupported on this compiler.");
+#endif
 }
 
 template <typename E, E Value>
@@ -1120,13 +1386,13 @@ constexpr bool is_named_enum_value()
 {
     static_assert(std::is_enum_v<E>);
 
-    constexpr sentinel_string_view fragment = enum_argument_fragment(enum_value_signature<E, Value>());
+    constexpr auto signature = enum_value_signature<E, Value>();
+    constexpr auto fragment = enum_argument_fragment(signature);
 
     if (fragment.empty())
         return false;
 
     const char lead = fragment[0];
-
     if (lead == '(' || lead == '-' || (lead >= '0' && lead <= '9'))
         return false;
 
@@ -1136,7 +1402,13 @@ constexpr bool is_named_enum_value()
 template <typename T>
 constexpr sentinel_string_view type_signature()
 {
+#if defined(__clang__) || defined(__GNUC__)
     return __PRETTY_FUNCTION__;
+#elif defined(_MSC_VER)
+    return __FUNCSIG__;
+#else
+    static_assert(always_false_v<T>, "Type signature reflection is unsupported on this compiler.");
+#endif
 }
 
 constexpr std::uint64_t fnv1a_64(sentinel_string_view text) noexcept
@@ -1227,10 +1499,10 @@ constexpr std::underlying_type_t<E> find_automatic_enum_sentinel()
 
 }  // namespace detail
 
-template <auto Representation>
+template <auto Repr>
 struct sentinel_bits {
-    using representation_type = decltype(Representation);
-    static constexpr representation_type value = Representation;
+    using representation_type = decltype(Repr);
+    static constexpr representation_type value = Repr;
 };
 
 struct separate_flag_policy {};
@@ -1287,28 +1559,47 @@ struct automatic_sentinel<T, std::enable_if_t<std::is_pointer_v<T>>> {
     static_assert(sizeof(representation_type) == sizeof(T));
 };
 
+#if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
+inline constexpr bool has_enum_reflection = true;
+#else
+inline constexpr bool has_enum_reflection = false;
+#endif
+
 template <typename E>
-struct automatic_sentinel<
-    E, std::enable_if_t<std::is_enum_v<E> && !std::is_convertible_v<E, std::underlying_type_t<E>>>> {
+struct automatic_sentinel<E,
+                          std::enable_if_t<has_enum_reflection && std::is_enum_v<E> &&
+                                           !std::is_convertible_v<E, std::underlying_type_t<E>>>> {
     using representation_type = std::underlying_type_t<E>;
+
     static constexpr representation_type value = detail::find_automatic_enum_sentinel<E>();
 
     static_assert(!detail::is_named_enum_value<E, static_cast<E>(value)>());
 };
 
+template <typename T, typename = void>
+struct has_automatic_sentinel : std::false_type {};
+
 template <typename T>
-concept has_automatic_sentinel = requires {
-    typename automatic_sentinel<detail::unqualified_t<T>>::representation_type;
-    automatic_sentinel<detail::unqualified_t<T>>::value;
-};
+struct has_automatic_sentinel<
+    T, std::void_t<typename automatic_sentinel<detail::unqualified_t<T>>::representation_type,
+                   decltype(automatic_sentinel<detail::unqualified_t<T>>::value)>>
+    : std::true_type {};
+
+template <typename T>
+inline constexpr bool has_automatic_sentinel_v = has_automatic_sentinel<T>::value;
+
+template <typename Policy, typename = void>
+struct sentinel_policy : std::false_type {};
 
 template <typename Policy>
-concept sentinel_policy = requires {
-    typename Policy::representation_type;
-    Policy::value;
-};
+struct sentinel_policy<Policy,
+                       std::void_t<typename Policy::representation_type, decltype(Policy::value)>>
+    : std::true_type {};
 
-template <typename T, bool = has_automatic_sentinel<T>>
+template <typename Policy>
+inline constexpr bool sentinel_policy_v = sentinel_policy<Policy>::value;
+
+template <typename T, bool = has_automatic_sentinel_v<T>>
 struct default_policy_selector {
     using type = separate_flag_policy;
 };
@@ -1323,13 +1614,13 @@ using default_policy_t = typename default_policy_selector<T>::type;
 
 namespace detail {
 
-template <typename Policy, bool = sentinel_policy<Policy>>
+template <typename Policy, bool = sentinel_policy_v<Policy>>
 struct sentinel_metadata {};
 
 template <typename Policy>
 struct sentinel_metadata<Policy, true> {
     using sentinel_representation_type = typename Policy::representation_type;
-    inline static constexpr sentinel_representation_type sentinel_representation = Policy::value;
+    static constexpr sentinel_representation_type sentinel_representation = Policy::value;
 };
 
 template <typename T, typename Policy>
@@ -1347,11 +1638,11 @@ private:
                   "The sentinel representation must have the same size as T");
 
     union punned {
-        representation_type rep;
+        representation_type repr;
         T                   value;
 
         constexpr punned() noexcept
-            : rep(Policy::value)
+            : repr(Policy::value)
         {
         }
 
@@ -1373,12 +1664,12 @@ private:
 
     constexpr void write_empty() noexcept
     {
-        m_storage.rep = Policy::value;
+        m_storage.repr = Policy::value;
     }
 
     [[nodiscard]] static constexpr bool has_reserved_representation(const T &value) noexcept
     {
-        return punned(value).rep == Policy::value;
+        return punned(value).repr == Policy::value;
     }
 
     constexpr void start_lifetime_from(const T &value) noexcept
@@ -1387,8 +1678,8 @@ private:
     }
 
 public:
-    inline static constexpr bool is_compressed = true;
-    inline static constexpr bool policy_is_sound = requires { Policy::sound; };
+    static constexpr bool is_compressed = true;
+    static constexpr bool policy_is_sound = has_sound_member<Policy>::value;
 
     constexpr compressed_storage() noexcept
     {
@@ -1446,7 +1737,7 @@ public:
 
     [[nodiscard]] constexpr bool has_value() const noexcept
     {
-        return m_storage.rep != Policy::value;
+        return m_storage.repr != Policy::value;
     }
 
     explicit constexpr operator bool() const noexcept
@@ -1573,27 +1864,42 @@ public:
     }
 };
 
+template <typename T, bool Trivial = std::is_trivially_destructible_v<T>>
+union separate_storage_union;
+
 template <typename T>
-class separate_storage {
-    union storage_union {
-        char inactive;
-        T    value;
+union separate_storage_union<T, true> {
+    char inactive;
+    T    value;
 
-        constexpr storage_union() noexcept
-            : inactive{}
-        {
-        }
+    constexpr separate_storage_union() noexcept
+        : inactive{}
+    {
+    }
 
-        ~storage_union()
-            requires std::is_trivially_destructible_v<T>
-        = default;
+    ~separate_storage_union() = default;
+};
 
-        ~storage_union()
-        {
-        }
-    } m_storage;
+template <typename T>
+union separate_storage_union<T, false> {
+    char inactive;
+    T    value;
 
-    bool m_has_value = false;
+    constexpr separate_storage_union() noexcept
+        : inactive{}
+    {
+    }
+
+    ~separate_storage_union()
+    {
+    }
+};
+
+template <typename T>
+class separate_storage_core {
+protected:
+    separate_storage_union<T> m_storage;
+    bool                      m_has_value = false;
 
     [[nodiscard]] constexpr T *ptr() noexcept
     {
@@ -1605,78 +1911,8 @@ class separate_storage {
         return std::launder(addressof(m_storage.value));
     }
 
-public:
-    inline static constexpr bool is_compressed = false;
-
-    constexpr separate_storage() noexcept = default;
-    constexpr separate_storage(nullopt_t) noexcept
-        : separate_storage()
-    {
-    }
-
-    template <typename U = T>
-        requires std::constructible_from<T, U &&>
-    explicit(!std::convertible_to<U &&, T>) constexpr separate_storage(U &&value)
-        : separate_storage()
-    {
-        emplace(forward<U>(value));
-    }
-
-    template <typename... Args>
-        requires std::constructible_from<T, Args...>
-    explicit constexpr separate_storage(in_place_t, Args &&...args)
-        : separate_storage()
-    {
-        emplace(forward<Args>(args)...);
-    }
-
-    separate_storage(const separate_storage &)
-        requires std::is_trivially_copy_constructible_v<T>
-    = default;
-
-    separate_storage(separate_storage &&)
-        requires std::is_trivially_move_constructible_v<T>
-    = default;
-
-    ~separate_storage()
-        requires std::is_trivially_destructible_v<T>
-    = default;
-
-    separate_storage &operator=(const separate_storage &)
-        requires std::is_trivially_copy_constructible_v<T> && std::is_trivially_destructible_v<T> &&
-                 std::is_trivially_copy_assignable_v<T>
-    = default;
-
-    separate_storage &operator=(separate_storage &&)
-        requires std::is_trivially_move_constructible_v<T> && std::is_trivially_destructible_v<T> &&
-                 std::is_trivially_move_assignable_v<T>
-    = default;
-
-    separate_storage(const separate_storage &other)
-        requires(!std::is_trivially_copy_constructible_v<T>) && std::copy_constructible<T>
-        : separate_storage()
-    {
-        if (other.has_value())
-            emplace(*other);
-    }
-
-    separate_storage(separate_storage &&other) noexcept(std::is_nothrow_move_constructible_v<T>)
-        requires(!std::is_trivially_move_constructible_v<T>) && std::move_constructible<T>
-        : separate_storage()
-    {
-        if (other.has_value())
-            emplace(move(*other));
-    }
-
-    ~separate_storage()
-    {
-        reset();
-    }
-
-    separate_storage &operator=(const separate_storage &other)
-        requires(!(std::is_trivially_copy_constructible_v<T> &&
-                   std::is_trivially_destructible_v<T> &&
-                   std::is_trivially_copy_assignable_v<T>)) && std::copy_constructible<T>
+    template <typename Other>
+    void copy_assign_from(const Other &other)
     {
         if (this != addressof(other)) {
             if (other.has_value()) {
@@ -1685,34 +1921,84 @@ public:
                 reset();
             }
         }
-
-        return *this;
     }
 
-    separate_storage &operator=(separate_storage &&other) noexcept(
-        std::is_nothrow_move_constructible_v<T>)
-        requires(!(std::is_trivially_move_constructible_v<T> && std::is_trivially_destructible_v<T> && std::is_trivially_move_assignable_v<T>)) && std::move_constructible<T>
+    template <typename Other>
+    void move_assign_from(Other &&other) noexcept(std::is_nothrow_move_constructible_v<T>)
     {
-        if (this != addressof(other)) {
+        if (static_cast<const void *>(this) != static_cast<const void *>(addressof(other))) {
             if (other.has_value()) {
                 emplace(move(*other));
             } else {
                 reset();
             }
         }
-
-        return *this;
     }
 
-    constexpr separate_storage &operator=(nullopt_t) noexcept
+public:
+    static constexpr bool is_compressed = false;
+
+    constexpr separate_storage_core() noexcept = default;
+
+    constexpr separate_storage_core(nullopt_t) noexcept
+        : separate_storage_core()
+    {
+    }
+
+    template <typename U = T,
+              std::enable_if_t<std::is_constructible_v<T, U &&> && std::is_convertible_v<U &&, T>,
+                               int> = 0>
+    constexpr separate_storage_core(U &&value)
+        : separate_storage_core()
+    {
+        emplace(forward<U>(value));
+    }
+
+    template <typename U = T,
+              std::enable_if_t<std::is_constructible_v<T, U &&> && !std::is_convertible_v<U &&, T>,
+                               int> = 0>
+    explicit constexpr separate_storage_core(U &&value)
+        : separate_storage_core()
+    {
+        emplace(forward<U>(value));
+    }
+
+    template <typename... Args, std::enable_if_t<std::is_constructible_v<T, Args...>, int> = 0>
+    explicit constexpr separate_storage_core(in_place_t, Args &&...args)
+        : separate_storage_core()
+    {
+        emplace(forward<Args>(args)...);
+    }
+
+    separate_storage_core(copy_construct_tag, const separate_storage_core &other)
+        : separate_storage_core()
+    {
+        if (other.has_value())
+            emplace(*other);
+    }
+
+    separate_storage_core(move_construct_tag, separate_storage_core &&other) noexcept(
+        std::is_nothrow_move_constructible_v<T>)
+        : separate_storage_core()
+    {
+        if (other.has_value())
+            emplace(move(*other));
+    }
+
+    separate_storage_core(const separate_storage_core &) = default;
+    separate_storage_core(separate_storage_core &&) = default;
+    separate_storage_core &operator=(const separate_storage_core &) = default;
+    separate_storage_core &operator=(separate_storage_core &&) = default;
+    ~separate_storage_core() = default;
+
+    constexpr separate_storage_core &operator=(nullopt_t) noexcept
     {
         reset();
         return *this;
     }
 
-    template <typename U = T>
-        requires std::constructible_from<T, U &&>
-    constexpr separate_storage &operator=(U &&value)
+    template <typename U = T, std::enable_if_t<std::is_constructible_v<T, U &&>, int> = 0>
+    constexpr separate_storage_core &operator=(U &&value)
     {
         emplace(forward<U>(value));
         return *this;
@@ -1808,8 +2094,7 @@ public:
         return has_value() ? move(**this) : static_cast<T>(forward<U>(default_value));
     }
 
-    template <typename... Args>
-        requires std::constructible_from<T, Args...>
+    template <typename... Args, std::enable_if_t<std::is_constructible_v<T, Args...>, int> = 0>
     constexpr T &emplace(Args &&...args)
     {
         reset();
@@ -1827,8 +2112,8 @@ public:
         }
     }
 
-    constexpr void swap(separate_storage &other) noexcept(noexcept(detail::swap(**this, *other)) &&
-                                                         std::is_nothrow_move_constructible_v<T>)
+    constexpr void swap(separate_storage_core &other) noexcept(
+        noexcept(detail::swap(**this, *other)) && std::is_nothrow_move_constructible_v<T>)
     {
         if (has_value() && other.has_value()) {
             using detail::swap;
@@ -1843,7 +2128,84 @@ public:
     }
 };
 
-template <typename T, typename Policy, bool = sentinel_policy<Policy>>
+template <typename T, bool TrivialDtor = std::is_trivially_destructible_v<T>>
+class separate_storage_dtor_layer;
+
+template <typename T>
+class separate_storage_dtor_layer<T, true> : public separate_storage_core<T> {
+    using base = separate_storage_core<T>;
+
+public:
+    using base::base;
+    using base::operator=;
+
+    separate_storage_dtor_layer(const separate_storage_dtor_layer &) = default;
+    separate_storage_dtor_layer(separate_storage_dtor_layer &&) = default;
+    separate_storage_dtor_layer &operator=(const separate_storage_dtor_layer &) = default;
+    separate_storage_dtor_layer &operator=(separate_storage_dtor_layer &&) = default;
+    ~separate_storage_dtor_layer() = default;
+};
+
+template <typename T>
+class separate_storage_dtor_layer<T, false> : public separate_storage_core<T> {
+    using base = separate_storage_core<T>;
+
+public:
+    using base::base;
+    using base::operator=;
+
+    separate_storage_dtor_layer(const separate_storage_dtor_layer &) = default;
+    separate_storage_dtor_layer(separate_storage_dtor_layer &&) = default;
+    separate_storage_dtor_layer &operator=(const separate_storage_dtor_layer &) = default;
+    separate_storage_dtor_layer &operator=(separate_storage_dtor_layer &&) = default;
+
+    ~separate_storage_dtor_layer()
+    {
+        this->reset();
+    }
+};
+
+template <typename T>
+using separate_storage_copy_ctor_layer =
+    ::lsr::result::detail::copy_ctor_layer<separate_storage_dtor_layer<T>,
+                                           std::is_copy_constructible_v<T>,
+                                           std::is_trivially_copy_constructible_v<T>>;
+
+template <typename T>
+using separate_storage_move_ctor_layer =
+    ::lsr::result::detail::move_ctor_layer<separate_storage_copy_ctor_layer<T>,
+                                           std::is_move_constructible_v<T>,
+                                           std::is_trivially_move_constructible_v<T>>;
+
+template <typename T>
+using separate_storage_copy_assign_layer = ::lsr::result::detail::copy_assign_layer<
+    separate_storage_move_ctor_layer<T>, std::is_copy_constructible_v<T>,
+    std::is_trivially_copy_constructible_v<T> && std::is_trivially_destructible_v<T> &&
+        std::is_trivially_copy_assignable_v<T>>;
+
+template <typename T>
+using separate_storage_impl = ::lsr::result::detail::move_assign_layer<
+    separate_storage_copy_assign_layer<T>, std::is_move_constructible_v<T>,
+    std::is_trivially_move_constructible_v<T> && std::is_trivially_destructible_v<T> &&
+        std::is_trivially_move_assignable_v<T>>;
+
+template <typename T>
+class separate_storage : public separate_storage_impl<T> {
+    using base = separate_storage_impl<T>;
+
+public:
+    using base::base;
+    using base::operator=;
+
+    constexpr separate_storage() noexcept = default;
+    separate_storage(const separate_storage &) = default;
+    separate_storage(separate_storage &&) = default;
+    separate_storage &operator=(const separate_storage &) = default;
+    separate_storage &operator=(separate_storage &&) = default;
+    ~separate_storage() = default;
+};
+
+template <typename T, typename Policy, bool = sentinel_policy_v<Policy>>
 struct storage_selector;
 
 template <typename T, typename Policy>
@@ -1857,6 +2219,14 @@ struct storage_selector<T, Policy, false> {
                   "Policy must be a sentinel policy or tiny::separate_flag_policy");
     using type = separate_storage<T>;
 };
+
+template <typename Storage, typename Enable, typename... Args>
+struct can_emplace : std::false_type {};
+
+template <typename Storage, typename... Args>
+struct can_emplace<
+    Storage, std::void_t<decltype(std::declval<Storage &>().emplace(std::declval<Args>()...))>,
+    Args...> : std::true_type {};
 
 }  // namespace detail
 
@@ -1876,7 +2246,7 @@ public:
     using value_type = T;
     using policy_type = Policy;
 
-    inline static constexpr bool uses_compressed_storage = storage_type::is_compressed;
+    static constexpr bool uses_compressed_storage = storage_type::is_compressed;
 
     constexpr optional() noexcept(std::is_nothrow_default_constructible_v<storage_type>) = default;
 
@@ -1885,18 +2255,34 @@ public:
     {
     }
 
-    template <typename U = T>
-        requires std::constructible_from<storage_type, U &&> &&
-                 (!std::same_as<std::remove_cvref_t<U>, optional>) &&
-                 (!std::same_as<std::remove_cvref_t<U>, in_place_t>) &&
-                 (!std::same_as<std::remove_cvref_t<U>, nullopt_t>)
-    explicit(!std::convertible_to<U &&, T>) constexpr optional(U &&value)
+    template <typename U = T,
+              std::enable_if_t<
+                  std::is_constructible_v<storage_type, U &&> &&
+                      !std::is_same_v<::lsr::result::detail::remove_cvref_t<U>, optional> &&
+                      !std::is_same_v<::lsr::result::detail::remove_cvref_t<U>, in_place_t> &&
+                      !std::is_same_v<::lsr::result::detail::remove_cvref_t<U>, nullopt_t> &&
+                      std::is_convertible_v<U &&, T>,
+                  int> = 0>
+    constexpr optional(U &&value)
         : m_storage(forward<U>(value))
     {
     }
 
-    template <typename... Args>
-        requires std::constructible_from<storage_type, in_place_t, Args...>
+    template <typename U = T,
+              std::enable_if_t<
+                  std::is_constructible_v<storage_type, U &&> &&
+                      !std::is_same_v<::lsr::result::detail::remove_cvref_t<U>, optional> &&
+                      !std::is_same_v<::lsr::result::detail::remove_cvref_t<U>, in_place_t> &&
+                      !std::is_same_v<::lsr::result::detail::remove_cvref_t<U>, nullopt_t> &&
+                      !std::is_convertible_v<U &&, T>,
+                  int> = 0>
+    explicit constexpr optional(U &&value)
+        : m_storage(forward<U>(value))
+    {
+    }
+
+    template <typename... Args,
+              std::enable_if_t<std::is_constructible_v<storage_type, in_place_t, Args...>, int> = 0>
     explicit constexpr optional(in_place_t, Args &&...args)
         : m_storage(in_place, forward<Args>(args)...)
     {
@@ -1916,9 +2302,11 @@ public:
         return *this;
     }
 
-    template <typename U = T>
-        requires requires(storage_type &storage, U &&value) { storage = forward<U>(value); } &&
-                 (!std::same_as<std::remove_cvref_t<U>, optional>)
+    template <
+        typename U = T,
+        std::enable_if_t<std::is_assignable_v<storage_type &, U &&> &&
+                             !std::is_same_v<::lsr::result::detail::remove_cvref_t<U>, optional>,
+                         int> = 0>
     constexpr optional &operator=(U &&value)
     {
         m_storage = forward<U>(value);
@@ -1997,10 +2385,8 @@ public:
         return move(m_storage).value_or(forward<U>(default_value));
     }
 
-    template <typename... Args>
-        requires requires(storage_type &storage, Args &&...args) {
-            storage.emplace(forward<Args>(args)...);
-        }
+    template <typename... Args,
+              std::enable_if_t<detail::can_emplace<storage_type, void, Args &&...>::value, int> = 0>
     constexpr T &emplace(Args &&...args)
     {
         return m_storage.emplace(forward<Args>(args)...);
@@ -2065,35 +2451,49 @@ constexpr void swap(optional<T, Policy> &lhs,
 // =================================================================================================
 
 template <typename T>
-using niche_policy_t = std::conditional_t<
-    std::is_lvalue_reference_v<T>,
-    storage::nonnull_pointer_policy<stored_type_t<T>>,
-    storage::default_policy_t<stored_type_t<T>>>;
+using niche_policy_t = std::conditional_t<std::is_lvalue_reference_v<T>,
+                                          storage::nonnull_pointer_policy<stored_type_t<T>>,
+                                          storage::default_policy_t<stored_type_t<T>>>;
+
+template <typename T, typename E,
+          bool Trivial = std::is_trivially_destructible_v<wrapper::Ok<T>> &&
+                         std::is_trivially_destructible_v<wrapper::Err<E>>>
+union general_result_data_union;
 
 template <typename T, typename E>
-class general_result_storage {
+union general_result_data_union<T, E, true> {
+    wrapper::Ok<T>  ok;
+    wrapper::Err<E> err;
+
+    general_result_data_union() noexcept
+    {
+    }
+
+    ~general_result_data_union() = default;
+};
+
+template <typename T, typename E>
+union general_result_data_union<T, E, false> {
+    wrapper::Ok<T>  ok;
+    wrapper::Err<E> err;
+
+    general_result_data_union() noexcept
+    {
+    }
+
+    ~general_result_data_union()
+    {
+    }
+};
+
+template <typename T, typename E>
+class general_result_storage_core {
     static_assert(!std::is_void_v<T> && !std::is_void_v<E>,
                   "Primary general_result_storage requires non-void T and E.");
 
-    union data_union {
-        wrapper::Ok<T>  ok;
-        wrapper::Err<E> err;
-
-        data_union() noexcept
-        {
-        }
-
-        ~data_union()
-            requires std::is_trivially_destructible_v<wrapper::Ok<T>> &&
-                     std::is_trivially_destructible_v<wrapper::Err<E>>
-        = default;
-
-        ~data_union()
-        {
-        }
-    } m_data;
-
-    bool m_ok;
+protected:
+    general_result_data_union<T, E> m_data;
+    bool                            m_ok;
 
     wrapper::Ok<T> &ok_state()
     {
@@ -2208,9 +2608,43 @@ class general_result_storage {
         }
     }
 
+    template <typename Other>
+    void copy_assign_from(const Other &other)
+    {
+        const general_result_storage_core &rhs = other;
+
+        if (static_cast<const void *>(this) != static_cast<const void *>(addressof(rhs))) {
+            if (m_ok == rhs.m_ok) {
+                assign_same_arm(rhs);
+            } else if (rhs.m_ok) {
+                reinit<true>(rhs.ok_state());
+            } else {
+                reinit<false>(rhs.err_state());
+            }
+        }
+    }
+
+    template <typename Other>
+    void move_assign_from(Other &&other) noexcept(
+        std::is_nothrow_move_constructible_v<wrapper::Ok<T>> &&
+        std::is_nothrow_move_constructible_v<wrapper::Err<E>>)
+    {
+        general_result_storage_core &rhs = other;
+
+        if (static_cast<const void *>(this) != static_cast<const void *>(addressof(rhs))) {
+            if (m_ok == rhs.m_ok) {
+                assign_same_arm(move(rhs));
+            } else if (rhs.m_ok) {
+                reinit<true>(move(rhs.ok_state()));
+            } else {
+                reinit<false>(move(rhs.err_state()));
+            }
+        }
+    }
+
 public:
     template <typename U, std::enable_if_t<resolve_plan<T, U>::legal, int> = 0>
-    explicit general_result_storage(wrapper::Ok<U> &&ok)
+    explicit general_result_storage_core(wrapper::Ok<U> &&ok)
         : m_ok(true)
     {
         if constexpr (resolve_plan<T, U>::binds_reference) {
@@ -2221,7 +2655,7 @@ public:
     }
 
     template <typename G, std::enable_if_t<resolve_plan<E, G>::legal, int> = 0>
-    explicit general_result_storage(wrapper::Err<G> &&err)
+    explicit general_result_storage_core(wrapper::Err<G> &&err)
         : m_ok(false)
     {
         if constexpr (resolve_plan<E, G>::binds_reference) {
@@ -2231,20 +2665,7 @@ public:
         }
     }
 
-    static constexpr bool triv_copy = std::is_trivially_copy_constructible_v<wrapper::Ok<T>> &&
-                                      std::is_trivially_copy_constructible_v<wrapper::Err<E>>;
-    static constexpr bool triv_move = std::is_trivially_move_constructible_v<wrapper::Ok<T>> &&
-                                      std::is_trivially_move_constructible_v<wrapper::Err<E>>;
-    static constexpr bool triv_dtor = std::is_trivially_destructible_v<wrapper::Ok<T>> &&
-                                      std::is_trivially_destructible_v<wrapper::Err<E>>;
-
-    general_result_storage(const general_result_storage &)
-        requires triv_copy
-    = default;
-
-    general_result_storage(const general_result_storage &other)
-        requires(!triv_copy) && std::copy_constructible<wrapper::Ok<T>> &&
-                std::copy_constructible<wrapper::Err<E>>
+    general_result_storage_core(copy_construct_tag, const general_result_storage_core &other)
         : m_ok(other.m_ok)
     {
         if (m_ok) {
@@ -2254,15 +2675,9 @@ public:
         }
     }
 
-    general_result_storage(general_result_storage &&)
-        requires triv_move
-    = default;
-
-    general_result_storage(general_result_storage &&other) noexcept(
+    general_result_storage_core(move_construct_tag, general_result_storage_core &&other) noexcept(
         std::is_nothrow_move_constructible_v<wrapper::Ok<T>> &&
         std::is_nothrow_move_constructible_v<wrapper::Err<E>>)
-        requires(!triv_move) && std::move_constructible<wrapper::Ok<T>> &&
-                std::move_constructible<wrapper::Err<E>>
         : m_ok(other.m_ok)
     {
         if (m_ok) {
@@ -2272,68 +2687,11 @@ public:
         }
     }
 
-    ~general_result_storage()
-        requires triv_dtor
-    = default;
-
-    ~general_result_storage()
-    {
-        destroy_active();
-    }
-
-    general_result_storage &operator=(const general_result_storage &)
-        requires triv_copy && triv_dtor &&
-                 std::is_trivially_copy_assignable_v<wrapper::Ok<T>> &&
-                 std::is_trivially_copy_assignable_v<wrapper::Err<E>>
-    = default;
-
-    general_result_storage &operator=(const general_result_storage &other)
-        requires(!(triv_copy && triv_dtor &&
-                   std::is_trivially_copy_assignable_v<wrapper::Ok<T>> &&
-                   std::is_trivially_copy_assignable_v<wrapper::Err<E>>)) &&
-                std::copy_constructible<wrapper::Ok<T>> &&
-                std::copy_constructible<wrapper::Err<E>>
-    {
-        if (this != addressof(other)) {
-            if (m_ok == other.m_ok) {
-                assign_same_arm(other);
-            } else if (other.m_ok) {
-                reinit<true>(other.ok_state());
-            } else {
-                reinit<false>(other.err_state());
-            }
-        }
-
-        return *this;
-    }
-
-    general_result_storage &operator=(general_result_storage &&)
-        requires triv_move && triv_dtor &&
-                 std::is_trivially_move_assignable_v<wrapper::Ok<T>> &&
-                 std::is_trivially_move_assignable_v<wrapper::Err<E>>
-    = default;
-
-    general_result_storage &operator=(general_result_storage &&other) noexcept(
-        std::is_nothrow_move_constructible_v<wrapper::Ok<T>> &&
-        std::is_nothrow_move_constructible_v<wrapper::Err<E>>)
-        requires(!(triv_move && triv_dtor &&
-                   std::is_trivially_move_assignable_v<wrapper::Ok<T>> &&
-                   std::is_trivially_move_assignable_v<wrapper::Err<E>>)) &&
-                std::move_constructible<wrapper::Ok<T>> &&
-                std::move_constructible<wrapper::Err<E>>
-    {
-        if (this != addressof(other)) {
-            if (m_ok == other.m_ok) {
-                assign_same_arm(move(other));
-            } else if (other.m_ok) {
-                reinit<true>(move(other.ok_state()));
-            } else {
-                reinit<false>(move(other.err_state()));
-            }
-        }
-
-        return *this;
-    }
+    general_result_storage_core(const general_result_storage_core &) = default;
+    general_result_storage_core(general_result_storage_core &&) = default;
+    general_result_storage_core &operator=(const general_result_storage_core &) = default;
+    general_result_storage_core &operator=(general_result_storage_core &&) = default;
+    ~general_result_storage_core() = default;
 
     [[nodiscard]] bool has_ok() const noexcept
     {
@@ -2400,6 +2758,106 @@ public:
     }
 };
 
+template <typename T, typename E,
+          bool TrivialDtor = std::is_trivially_destructible_v<wrapper::Ok<T>> &&
+                             std::is_trivially_destructible_v<wrapper::Err<E>>>
+class general_result_storage_dtor_layer;
+
+template <typename T, typename E>
+class general_result_storage_dtor_layer<T, E, true> : public general_result_storage_core<T, E> {
+    using base = general_result_storage_core<T, E>;
+
+public:
+    using base::base;
+    using base::operator=;
+
+    general_result_storage_dtor_layer(const general_result_storage_dtor_layer &) = default;
+    general_result_storage_dtor_layer(general_result_storage_dtor_layer &&) = default;
+    general_result_storage_dtor_layer &operator=(const general_result_storage_dtor_layer &) =
+        default;
+    general_result_storage_dtor_layer &operator=(general_result_storage_dtor_layer &&) = default;
+    ~general_result_storage_dtor_layer() = default;
+};
+
+template <typename T, typename E>
+class general_result_storage_dtor_layer<T, E, false> : public general_result_storage_core<T, E> {
+    using base = general_result_storage_core<T, E>;
+
+public:
+    using base::base;
+    using base::operator=;
+
+    general_result_storage_dtor_layer(const general_result_storage_dtor_layer &) = default;
+    general_result_storage_dtor_layer(general_result_storage_dtor_layer &&) = default;
+    general_result_storage_dtor_layer &operator=(const general_result_storage_dtor_layer &) =
+        default;
+    general_result_storage_dtor_layer &operator=(general_result_storage_dtor_layer &&) = default;
+
+    ~general_result_storage_dtor_layer()
+    {
+        this->destroy_active();
+    }
+};
+
+template <typename T, typename E>
+inline constexpr bool general_copy_constructible =
+    copy_constructible_v<wrapper::Ok<T>> && copy_constructible_v<wrapper::Err<E>>;
+
+template <typename T, typename E>
+inline constexpr bool general_move_constructible =
+    move_constructible_v<wrapper::Ok<T>> && move_constructible_v<wrapper::Err<E>>;
+
+template <typename T, typename E>
+inline constexpr bool general_triv_copy = std::is_trivially_copy_constructible_v<wrapper::Ok<T>> &&
+                                          std::is_trivially_copy_constructible_v<wrapper::Err<E>>;
+
+template <typename T, typename E>
+inline constexpr bool general_triv_move = std::is_trivially_move_constructible_v<wrapper::Ok<T>> &&
+                                          std::is_trivially_move_constructible_v<wrapper::Err<E>>;
+
+template <typename T, typename E>
+inline constexpr bool general_triv_dtor = std::is_trivially_destructible_v<wrapper::Ok<T>> &&
+                                          std::is_trivially_destructible_v<wrapper::Err<E>>;
+
+template <typename T, typename E>
+using general_result_copy_ctor_layer =
+    copy_ctor_layer<general_result_storage_dtor_layer<T, E>, general_copy_constructible<T, E>,
+                    general_triv_copy<T, E>>;
+
+template <typename T, typename E>
+using general_result_move_ctor_layer =
+    move_ctor_layer<general_result_copy_ctor_layer<T, E>, general_move_constructible<T, E>,
+                    general_triv_move<T, E>>;
+
+template <typename T, typename E>
+using general_result_copy_assign_layer =
+    copy_assign_layer<general_result_move_ctor_layer<T, E>, general_copy_constructible<T, E>,
+                      general_triv_copy<T, E> && general_triv_dtor<T, E> &&
+                          std::is_trivially_copy_assignable_v<wrapper::Ok<T>> &&
+                          std::is_trivially_copy_assignable_v<wrapper::Err<E>>>;
+
+template <typename T, typename E>
+using general_result_storage_impl =
+    move_assign_layer<general_result_copy_assign_layer<T, E>, general_move_constructible<T, E>,
+                      general_triv_move<T, E> && general_triv_dtor<T, E> &&
+                          std::is_trivially_move_assignable_v<wrapper::Ok<T>> &&
+                          std::is_trivially_move_assignable_v<wrapper::Err<E>>>;
+
+template <typename T, typename E>
+class general_result_storage : public general_result_storage_impl<T, E> {
+    using base = general_result_storage_impl<T, E>;
+
+public:
+    using base::base;
+    using base::operator=;
+
+    general_result_storage(const general_result_storage &) = default;
+    general_result_storage(general_result_storage &&) = default;
+    general_result_storage &operator=(const general_result_storage &) = default;
+    general_result_storage &operator=(general_result_storage &&) = default;
+    ~general_result_storage() = default;
+};
+
 template <typename T, typename E>
 class result_storage : public general_result_storage<T, E> {
     using base = general_result_storage<T, E>;
@@ -2416,8 +2874,7 @@ inline constexpr bool ref_partition_inline =
 
 template <typename T, typename E>
 inline constexpr bool ref_partition_paired =
-    alignof(T) >= 2 && std::is_lvalue_reference_v<E> &&
-    alignof(std::remove_reference_t<E>) >= 2;
+    alignof(T) >= 2 && std::is_lvalue_reference_v<E> && alignof(std::remove_reference_t<E>) >= 2;
 
 template <typename T, typename E>
 inline constexpr bool ref_partition_viable =
@@ -2428,17 +2885,17 @@ struct err_arm_t {};
 
 template <typename T, typename E>
 class tagged_ref_storage {
-    static_assert(std::endian::native == std::endian::little,
+    static_assert(native_little_endian,
                   "The tagged reference partition assumes a little-endian layout");
 
     using word = std::uintptr_t;
 
-    inline static constexpr bool paired = ref_partition_paired<T, E>;
+    static constexpr bool paired = ref_partition_paired<T, E>;
 
     using err_object = std::remove_reference_t<E>;
 
     struct inline_slot {
-        std::uint32_t tag;
+        std::uint32_t                                         tag;
         std::conditional_t<paired, std::uint32_t, err_object> value;
     };
 
@@ -2512,7 +2969,8 @@ public:
         }
     }
 
-    constexpr std::conditional_t<paired, err_object &, const err_object &> err_ref() const & noexcept
+    constexpr std::conditional_t<paired, err_object &, const err_object &> err_ref()
+        const & noexcept
     {
         if constexpr (paired) {
             return *reinterpret_cast<err_object *>(m_rep & ~word{1});
@@ -2568,13 +3026,31 @@ public:
     result_storage &operator=(const result_storage &) = default;
     result_storage &operator=(result_storage &&) noexcept = default;
 
-    [[nodiscard]] bool has_ok() const noexcept { return m_ok.has_value(); }
-    [[nodiscard]] bool has_err() const noexcept { return !m_ok.has_value(); }
+    [[nodiscard]] bool has_ok() const noexcept
+    {
+        return m_ok.has_value();
+    }
+    [[nodiscard]] bool has_err() const noexcept
+    {
+        return !m_ok.has_value();
+    }
 
-    T &ok_ref() const noexcept { return **m_ok; }
-    void_value err_ref() const noexcept { return {}; }
-    T &take_ok() && noexcept { return **m_ok; }
-    void_value take_err() && noexcept { return {}; }
+    T &ok_ref() const noexcept
+    {
+        return **m_ok;
+    }
+    void_value err_ref() const noexcept
+    {
+        return {};
+    }
+    T &take_ok() && noexcept
+    {
+        return **m_ok;
+    }
+    void_value take_err() && noexcept
+    {
+        return {};
+    }
 };
 
 template <typename T>
@@ -3010,8 +3486,8 @@ public:
             return detail::move(*this).storage_ref().take_err();
     }
 
-    template <typename U, std::enable_if_t<!std::is_void_v<T> &&
-                                               std::is_constructible_v<T, U &&>, int> = 0>
+    template <typename U,
+              std::enable_if_t<!std::is_void_v<T> && std::is_constructible_v<T, U &&>, int> = 0>
     T unwrap_or(U &&fallback) const &
     {
         if (is_ok())
@@ -3020,8 +3496,8 @@ public:
         return static_cast<T>(detail::forward<U>(fallback));
     }
 
-    template <typename U, std::enable_if_t<!std::is_void_v<T> &&
-                                               std::is_constructible_v<T, U &&>, int> = 0>
+    template <typename U,
+              std::enable_if_t<!std::is_void_v<T> && std::is_constructible_v<T, U &&>, int> = 0>
     T unwrap_or(U &&fallback) &&
     {
         if (is_ok())
@@ -3436,12 +3912,12 @@ public:
 
 }  // namespace lsr::result
 
-#if defined(RESULT_DETAIL_DEFINED_RESULT_ASSERT)
+#ifdef RESULT_DETAIL_DEFINED_RESULT_ASSERT
 #    undef RESULT_ASSERT
 #    undef RESULT_DETAIL_DEFINED_RESULT_ASSERT
 #endif
 
-#if defined(RESULT_DETAIL_DEFINED_RESULT_ERROR)
+#ifdef RESULT_DETAIL_DEFINED_RESULT_ERROR
 #    undef RESULT_ERROR
 #    undef RESULT_DETAIL_DEFINED_RESULT_ERROR
 #endif
