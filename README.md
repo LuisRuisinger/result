@@ -1,6 +1,6 @@
 # cpp_result
 
-Single-header `Result<T, E>` for C++20 and onwards.
+Single-header `Result<T, E>` for C++17 and onwards.
 Requires GCC or Clang.
 
 ```cmake
@@ -25,8 +25,8 @@ Compared with `std::expected`:
 - It allows `void` and references on either side, e.g. `Result<Regs &, void>`.
 - `unwrap()` on an error always executed a user-defined panic hook. On `std::expected`, `*e` is undefined
   behaviour.
-- It needs only C++20, not C++23; Future work could backport it to C++14/17.
-- Freestanding support
+- Usable since C++17.
+- Freestanding support.
 
 ## Example
 
