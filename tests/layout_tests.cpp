@@ -1,7 +1,3 @@
-#ifndef RESULT_NAMESPACE
-#    define RESULT_NAMESPACE
-#endif
-
 #include <cstddef>
 #include <cstdint>
 #include <result/result.hpp>
@@ -9,7 +5,7 @@
 
 namespace {
 
-namespace result = lsr::result;
+namespace result = lsr;
 namespace storage = result::detail::storage;
 
 // -------------------------------------------------------------------------------------------------
@@ -63,29 +59,29 @@ consteval std::size_t union_with_bool_size()
 // optional<T>: compressed storage
 // -------------------------------------------------------------------------------------------------
 
-static_assert(storage::optional<bool>::uses_compressed_storage);
+static_assert(storage::optional<bool>::USES_COMPRESSED_STORAGE);
 static_assert(sizeof(storage::optional<bool>) == sizeof(bool));
 
-static_assert(storage::optional<float>::uses_compressed_storage);
+static_assert(storage::optional<float>::USES_COMPRESSED_STORAGE);
 static_assert(sizeof(storage::optional<float>) == sizeof(float));
 
-static_assert(storage::optional<double>::uses_compressed_storage);
+static_assert(storage::optional<double>::USES_COMPRESSED_STORAGE);
 static_assert(sizeof(storage::optional<double>) == sizeof(double));
 
-static_assert(storage::optional<int *>::uses_compressed_storage);
+static_assert(storage::optional<int *>::USES_COMPRESSED_STORAGE);
 static_assert(sizeof(storage::optional<int *>) == sizeof(int *));
 
 // -------------------------------------------------------------------------------------------------
 // optional<T>: separate flag storage
 // -------------------------------------------------------------------------------------------------
 
-static_assert(!storage::optional<no_niche_byte>::uses_compressed_storage);
+static_assert(!storage::optional<no_niche_byte>::USES_COMPRESSED_STORAGE);
 
 static_assert(sizeof(storage::optional<no_niche_byte>) == separate_optional_size<no_niche_byte>());
 
 static_assert(sizeof(storage::optional<no_niche_byte>) == 2U);
 
-static_assert(!storage::optional<no_niche_word>::uses_compressed_storage);
+static_assert(!storage::optional<no_niche_word>::USES_COMPRESSED_STORAGE);
 
 static_assert(sizeof(storage::optional<no_niche_word>) == separate_optional_size<no_niche_word>());
 

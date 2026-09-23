@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
+# Keep in step with CPP_RESULT_VERSION_* in include/result/result.hpp. This value is what
+# write_basic_package_version_file bakes into resultConfigVersion.cmake, and COMPATIBILITY
+# SameMajorVersion below means a stale major here rejects every correct find_package(result 2.x).
 project(result
-        VERSION 0.1.0
+        VERSION 2.0.1
         LANGUAGES CXX
 )
 

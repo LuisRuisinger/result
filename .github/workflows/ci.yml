@@ -1,0 +1,161 @@
+name: ci
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The header's niche packing depends on two compiler-specific behaviours: reading the inactive
+  # member of a union, and the exact shape of __PRETTY_FUNCTION__ (the enum sentinel search parses
+  # it). Neither is standard C++, and a change in either fails *silently* - detection falls back to
+  # a flag byte, or picks a value it should not have. layout_tests is the tripwire, so it has to run
+  # on both compilers, which is the main reason this matrix exists.
+  test:
+    name: ${{ matrix.compiler }} · c++${{ matrix.standard }} · ${{ matrix.build_type }} · san=${{ matrix.sanitizers }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [ gcc, clang ]
+        standard: [ '20', '23' ]
+        sanitizers: [ 'OFF', 'ON' ]
+        # Release matters, not just for speed: a dangling reference returned from map_or was
+        # invisible at -O0 and failed immediately at -O2. Debug-only CI would have shipped it.
+        build_type: [ Debug, Release ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select compiler
+        run: |
+          if [ "${{ matrix.compiler }}" = "gcc" ]; then
+            echo "CC=gcc"      >> "$GITHUB_ENV"
+            echo "CXX=g++"     >> "$GITHUB_ENV"
+          else
+            echo "CC=clang"    >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Versions
+        run: |
+          cmake --version | head -1
+          $CXX --version | head -1
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_STANDARD=${{ matrix.standard }}
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          -DRESULT_ENABLE_SANITIZERS=${{ matrix.sanitizers }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      # Includes the rejection suite, which drives the build of each must-not-compile target and
+      # expects it to fail. Those are the tests that catch a safety rule quietly reopening.
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # Kept separate from the matrix: this asserts the *layout* claims the README makes, so a failure
+  # here means the documented sizes are wrong rather than the behaviour.
+  layout:
+    name: layout claims
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run layout tests
+        run: |
+          if [ "${{ matrix.compiler }}" = "gcc" ]; then CXX=g++; else CXX=clang++; fi
+          "$CXX" -std=c++20 -Iinclude -Wall -Wextra -Wconversion \
+                 tests/layout_tests.cpp -o layout_tests
+          ./layout_tests
+          echo "layout claims hold for ${{ matrix.compiler }}"
+
+  # -ffreestanding sets __STDC_HOSTED__ to 0, which swaps in the header's own memcpy,
+  # construct_at, index_sequence, string_view, invoke and swap. Compile-only by design.
+  freestanding:
+    name: freestanding · ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile without a hosted runtime
+        run: |
+          if [ "${{ matrix.compiler }}" = "gcc" ]; then CXX=g++; else CXX=clang++; fi
+          "$CXX" -std=c++20 -Iinclude -ffreestanding -fno-exceptions -fno-rtti \
+                 -Wall -Wextra -Wconversion -c tests/freestanding_tests.cpp -o /dev/null
+          "$CXX" -std=c++20 -Iinclude -fno-exceptions \
+                 -Wall -Wextra -Wconversion -c tests/freestanding_tests.cpp -o /dev/null
+
+  # A custom RESULT_NAMESPACE and RESULT_DISABLE_NICHE are both documented configuration points,
+  # so they get compiled too rather than trusted.
+  configuration:
+    name: configuration macros
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Custom namespace
+        run: |
+          cat > ns.cpp <<'EOF'
+          #define RESULT_NAMESPACE acme
+          #include <result/result.hpp>
+          enum class E { A };
+          static_assert(sizeof(acme::Result<E, void>) == sizeof(E));
+          int main() { return acme::Result<int, E>(acme::Ok(0)).is_ok() ? 0 : 1; }
+          EOF
+          g++ -std=c++20 -Iinclude -Wall -Wextra ns.cpp -o ns && ./ns
+
+      - name: Niche disabled
+        run: |
+          cat > dn.cpp <<'EOF'
+          #define RESULT_DISABLE_NICHE
+          #include <result/result.hpp>
+          enum class E : int { A };
+          static_assert(sizeof(lsr::Result<E, void>) > sizeof(E));
+          int main() { return 0; }
+          EOF
+          g++ -std=c++20 -Iinclude -Wall -Wextra dn.cpp -o dn && ./dn
+
+  # There is deliberately no clang-tidy job. The baseline has never been established, and a
+  # permanently non-blocking job is one nobody reads. `-DRESULT_ENABLE_CLANG_TIDY=ON` still wires
+  # the checks up for a local run against .clang-tidy; bring the job back once its output is clean.
+  # bugprone-use-after-move is the check worth starting from: Result's combinators are
+  # &&-qualified and C++ moves are non-destructive, so a moved-from Result still reports is_ok().
+
+  # Blocking. .clang-format uses AlignFunctionDeclarations, which needs clang-format 20 or newer,
+  # so the job installs 20 rather than using the runner's 18 - the two disagree on this tree, and
+  # 18's answer is not the one .clang-format asks for. The whole tree is clean under 20.
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format 20
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          sudo apt-get install -y clang-format-20
+
+      - name: Check
+        run: |
+          clang-format-20 --version
+          clang-format-20 --style=file --dry-run --Werror \
+            include/result/result.hpp tests/*.cpp

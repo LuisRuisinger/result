@@ -1,101 +1,73 @@
 # cpp_result
 
-A Rust-inspired `Result<T, E>` type for C++20 and later.
-
-## Features
-
-- `Ok<T>` / `Err<E>` result values
-- `void` specializations
-- lvalue reference support
-- functional chaining via `map`, `map_err`, `and_then`, and `or_else`
-- niche optimization for selected `Result<T, void>` / `Result<void, E>` cases
-- freestanding mode via `RESULT_FREESTANDING`
-
-## Requirements
-
-C++20 or later.
-
-## Freestanding
-
-Define `RESULT_FREESTANDING` before including the header when building for a
-kernel or another freestanding target:
-
-```cpp
-#define RESULT_FREESTANDING
-#include <result/result.hpp>
-```
-
-In this mode the header avoids hosted-only dependencies such as `<iostream>`,
-`<stdexcept>`, `<variant>`, and exception-based APIs. Error paths use
-`RESULT_ERROR(message)`, and assertions use `RESULT_ASSERT(condition)`. Define
-those macros before including the header if your kernel has its own panic or
-assert implementation.
-
-`unwrap_or_throw()` is only available for hosted builds with exceptions enabled.
-The `multi_optional` hosted `std::variant` fallback is disabled in freestanding
-mode, so its alternatives must share an implicitly discoverable niche.
-
-## Installation
+Single-header `Result<T, E>` for C++17 and onwards.
+Requires GCC or Clang.
 
 ```cmake
 include(FetchContent)
-
-FetchContent_Declare(
-        result
+FetchContent_Declare(result
         GIT_REPOSITORY https://github.com/LuisRuisinger/cpp_result.git
-        GIT_TAG v0.1.0
-)
-
+        GIT_TAG        main) # more suitable would a release tag
 FetchContent_MakeAvailable(result)
-
 target_link_libraries(your_target PRIVATE lsr::result)
 ```
 
-Include:
+## Why
+
+- A function's signature shows that it can fail and how, instead of hiding it in `errno` or a
+  return code.
+- `Result` is `[[nodiscard]]`, and you only get the value by handling potentinal the error.
+- `map`, `map_err` and `and_then` pass errors up through layers without exceptions; Under this both the expected result and an potential error value cannot get lost and for each constructed path at compile time such values will be propagated. It is impossible to discard by accident an errornous state.
+
+Compared with `std::expected`:
+
+- Under certain circumstances tag bytes or other niche optimizations are being introduced at compiletime; E.g. it is possible to abuse non-zeroness of references or alignment of pointer values or unused enum values to store bool values. The result of such optimization is that under circumstances the same `Result<T, E>` fits in 8 bytes compared to 16 with `std::expected`; As such it can be retured by a register which would else happen through a memory address.
+- It allows `void` and references on either side, e.g. `Result<Regs &, void>`.
+- `unwrap()` on an error always executed a user-defined panic hook. On `std::expected`, `*e` is undefined
+  behaviour.
+- Usable since C++17.
+- Freestanding support.
+
+## Example
 
 ```cpp
-#include <result/result.hpp>
-```
+struct I2c { volatile std::uint32_t ctrl, status, data; };
 
-## Basic Usage
+// constexpr enum probing finds values that are unused by the underlying type
+enum class I2cError : std::uint8_t { Nack, Timeout };
 
-```cpp
-#include <iostream>
-#include <string>
-
-#include <result/result.hpp>
-
-using namespace lsr::result;
-
-Result<float, std::string> divide(int a, int b) {
-    if (b == 0)
-        return Err(std::string("division by zero"));
-
-    return Ok(static_cast<float>(a) / b);
+Result<void, I2cError> wait_done(I2c &bus)
+{
+    for (int spin = 0; spin < 10'000; ++spin) {
+        const std::uint32_t s = bus.status;
+        
+        if (s & NACK) 
+            return Err(I2cError::Nack);
+            
+        if (s & DONE) 
+            return Ok();
+    }
+    
+    return Err(I2cError::Timeout);
 }
 
-int main() {
-    auto result = divide(10, 2);
-
-    if (result.is_ok())
-        std::cout << result.unwrap_ref() << '\n';
-
-    return 0;
+Result<std::uint8_t, I2cError> read_reg(I2c &bus, std::uint8_t reg)
+{
+    bus.data = reg;
+    bus.ctrl = START;
+    
+    return wait_done(bus).map([&] { 
+        return static_cast<std::uint8_t>(bus.data); 
+    });
 }
+
+auto temp = read_reg(bus, REG_TEMP);
+if (temp.is_err())
+    return fault(temp.unwrap_err_ref());
+    
+report(std::move(temp).unwrap());
 ```
-
-## Notes
-
-Consuming methods such as `unwrap`, `unwrap_err`, `map`, and `and_then` are `&&`-qualified:
-
-```cpp
-auto value = std::move(result).unwrap();
-```
-
-Inspection methods such as `is_ok`, `is_err`, `unwrap_ref`, and `unwrap_err_ref` do not consume the result.
-
-Headers under `result/detail/` are implementation details and are not part of the public API.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT

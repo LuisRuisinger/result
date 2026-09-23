@@ -1,0 +1,21 @@
+# Build trees
+build/
+cmake-build-*/
+
+# CMake artifacts, if a build is ever configured in-tree
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+
+# IDE
+.idea/
+.vscode/
+.cache/
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
